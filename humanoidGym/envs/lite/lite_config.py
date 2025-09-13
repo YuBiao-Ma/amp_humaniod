@@ -65,8 +65,9 @@ class LiteAmpCfg( LeggedRobotCfg ):
         kp_range = [0.8,1.2]
         kd_range = [0.8,1.2]
         
-        add_action_lag = False
-        action_lag_timesteps_range = [0,6]#[10,40]#[0,30]
+        add_action_lag = True
+        action_lag_timesteps_range = [0,5]#[10,40]#[0,30]
+        max_lag_timesteps = 30
         
         randomize_restitution = False
         restitution_range = [0.0,1.0]
@@ -145,6 +146,7 @@ class LiteAmpCfg( LeggedRobotCfg ):
       
         decimation = 4
         use_filter = False
+        exp_avg_decay = 0.05
 
     class asset( LeggedRobotCfg.asset ):
        
@@ -180,35 +182,39 @@ class LiteAmpCfg( LeggedRobotCfg ):
         resampling_time = 10. # time before command are changed[s]
         heading_command = False#True # if true: compute         
         class ranges:
-            lin_vel_x = [-1, 2.5] # min max [m/s]            
+            lin_vel_x = [-1, 1] # min max [m/s]            
             lin_vel_y = [-0.8, 0.8]   # min max [m/s]
             ang_vel_yaw = [-1, 1]    # min max [rad/s]
             heading = [-3.14, 3.14]
   
     class rewards( LeggedRobotCfg.rewards ):
         soft_dof_pos_limit = 1
-        base_height_target = 0.74
+        base_height_target = 0.76
         max_contact_force = 500
         # only_positive_rewards = False
         class scales( LeggedRobotCfg.rewards.scales ):
             tracking_lin_vel = 3.0
-            tracking_ang_vel = 1.0
+            tracking_ang_vel = 1.5
             base_acc = 0.2
             #alive = 0.05
-            
+           
             #正则化
-            # stand_still = -1
+            stand_still = -1
+            orientation = -1
+            base_height = 0.2
             # action_rate = -0.01
             action_smooth = -0.01
             foot_slip = -0.1
             feet_contact_forces = 0.01
-            exp_energy = 0.05
+            # exp_energy = 0.05
+            power_dist = -2e-5
             torques = -0.00001
             dof_vel = -1e-4
             dof_acc = -2.5e-7
-            # ankle_pitch_energy = 0.1
-            # ankle_roll_energy = 0.1
-            # ankle_action_pitch = -0.05
+            ankle_pitch_energy = 0.1
+            ankle_roll_energy = 0.1
+            
+            # hip_action_pitch = -0.05
             # ankle_action_roll = -0.1     
                 
             dof_vel_limits = -0.1

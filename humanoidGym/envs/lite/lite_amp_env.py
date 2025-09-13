@@ -347,7 +347,7 @@ class LiteRobot(LeggedRobot):
             actions_scaled = self.actions * self.action_scales
  
             if self.cfg.domain_rand.add_action_lag:
-                self.action_lag_buffer[:,:,1:] = self.action_lag_buffer[:,:,:self.cfg.domain_rand.action_lag_timesteps_range[1]].clone()
+                self.action_lag_buffer[:,:,1:] = self.action_lag_buffer[:,:,:self.cfg.domain_rand.max_lag_timesteps].clone()
                 self.action_lag_buffer[:,:,0] = actions_scaled.clone()
                 lagged_actions_scaled = self.action_lag_buffer[torch.arange(self.num_envs),:,self.action_lag_timestep.long()]
             else:
@@ -495,6 +495,9 @@ class LiteRobot(LeggedRobot):
         if self.cfg.commands.curriculum and (self.common_step_counter % self.max_episode_length==0):
             # If the tracking reward is above 80% of the maximum, increase the range of commands
             self.update_command_curriculum(env_ids)
+
+            if self.cfg.domain_rand.add_action_lag:
+                self.update_action_lag_curriculum(env_ids)
             
         # reset robot states
         if self.cfg.env.reference_state_initialization:
@@ -535,6 +538,9 @@ class LiteRobot(LeggedRobot):
             self.extras["episode"]["terrain_level"] = torch.mean(self.terrain_levels.float())
         if self.cfg.commands.curriculum:
             self.extras["episode"]["max_command_x"] = self.command_ranges["lin_vel_x"][1]
+
+        if self.cfg.domain_rand.add_action_lag:
+            self.extras["episode"]["max_action_lag_timestep"] = self.action_lag_timesteps_range[1]
         # send timeout info to the algorithm
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
@@ -558,6 +564,18 @@ class LiteRobot(LeggedRobot):
         # If the tracking reward is above 80% of the maximum, increase the range of commands
         if torch.mean(self.episode_sums["tracking_lin_vel"][env_ids]) / self.max_episode_length > 0.8 * self.reward_scales["tracking_lin_vel"]:
             self.command_ranges["lin_vel_x"][1] = np.clip(self.command_ranges["lin_vel_x"][1] + 0.5, 0., self.cfg.commands.max_curriculum)
+
+    def update_action_lag_curriculum(self, env_ids):
+        """ Implements a curriculum of increasing commands
+
+        Args:
+            env_ids (List[int]): ids of environments being reset
+        """
+        # If the tracking reward is above 80% of the maximum, increase the range of commands
+        if torch.mean(self.episode_sums["tracking_lin_vel"][env_ids]) / self.max_episode_length > 0.8 * self.reward_scales["tracking_lin_vel"]:
+            self.action_lag_timesteps_range[1] = np.clip(self.action_lag_timesteps_range[1] + 2, 0., self.cfg.domain_rand.max_lag_timesteps)
+        
+    
             
     def _resample_commands(self, env_ids):
         """ Randommly select commands of some environments
@@ -609,7 +627,7 @@ class LiteRobot(LeggedRobot):
         z_pos = self.root_states[:, 2:3]
         gravity =self.projected_gravity
 
-        return torch.cat((gravity,joint_pos, joint_vel,foot_pos,left_foot_rpy,right_foot_rpy, base_lin_vel, base_ang_vel, z_pos), dim=-1)
+        return torch.cat((joint_pos, joint_vel,foot_pos, base_lin_vel, base_ang_vel, z_pos), dim=-1)
     
     def compute_observations(self):
         """ Computes observations
@@ -853,6 +871,10 @@ class LiteRobot(LeggedRobot):
     
     def _reward_ankle_action_roll(self):
         return torch.sum(torch.square(self.actions[:, [5,11]]), dim=1)
+    
+    def _reward_hip_action_pitch(self):
+        return torch.sum(torch.square(self.actions[:, [0,6]]), dim=1)* (torch.norm(self.commands[:, :2], dim=1) < 0.5)
+
     
     def _reward_foot_slip(self):
       

@@ -117,6 +117,7 @@ class LeggedRobotCfg(BaseConfig):
         
         add_action_lag = False
         action_lag_timesteps_range = [0,3]
+        max_lag_timesteps = 30
         
         randomize_restitution = False
         restitution_range = [0.0,1.0]

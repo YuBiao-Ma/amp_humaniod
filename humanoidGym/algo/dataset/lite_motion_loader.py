@@ -317,7 +317,7 @@ class LongAMPLoader:
     @property
     def observation_dim(self):
         """观察空间维度（固定为39，由TOTAL_DATA_SIZE控制）"""
-        return self.TOTAL_DATA_SIZE-7
+        return LongAMPLoader.JOINT_ANGLE_SIZE + LongAMPLoader.JOINT_VEL_SIZE + LongAMPLoader.END_EFFECTOR_POS_SIZE + LongAMPLoader.BASE_VEL_SIZE + LongAMPLoader.BASE_HEIGHT_SIZE
 
     @property
     def num_motions(self):
@@ -427,8 +427,15 @@ class LongAMPLoader:
         for _ in range(num_mini_batch):
             if self.preload_transitions:
                 idxs = np.random.choice(self.preloaded_s.shape[0], size=mini_batch_size)
-                s = self.preloaded_s[idxs,:-7]
-                s_next = self.preloaded_s_next[idxs,:-7]
+                s = self.preloaded_s[idxs,LongAMPLoader.JOINT_ANGLE_START_IDX:LongAMPLoader.END_EFFECTOR_POS_END_IDX]
+                s = torch.cat([
+                    s,
+                    self.preloaded_s[idxs, LongAMPLoader.BASE_VEL_START_IDX:LongAMPLoader.BASE_HEIGHT_END_IDX]], dim=-1)
+                s_next = self.preloaded_s_next[idxs,LongAMPLoader.JOINT_ANGLE_START_IDX:LongAMPLoader.END_EFFECTOR_POS_END_IDX]
+                s_next = torch.cat([
+                    s_next,
+                    self.preloaded_s_next[idxs, LongAMPLoader.BASE_VEL_START_IDX:LongAMPLoader.BASE_HEIGHT_END_IDX]], dim=-1)
+
             else:
                 traj_idxs = self.weighted_traj_idx_sample_batch(mini_batch_size)
                 times = self.traj_time_sample_batch(traj_idxs)

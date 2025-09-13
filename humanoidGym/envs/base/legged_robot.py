@@ -714,9 +714,9 @@ class LeggedRobot(BaseTask):
     def init_randomize_lag(self):
         # action lag
         if self.cfg.domain_rand.add_action_lag:   
-            self.action_lag_buffer = torch.zeros(self.num_envs,self.num_actions,self.cfg.domain_rand.action_lag_timesteps_range[1]+1,device=self.device)
+            self.action_lag_buffer = torch.zeros(self.num_envs,self.num_actions,self.cfg.domain_rand.max_lag_timesteps+1,device=self.device)
             self.action_lag_timestep = torch.randint(self.cfg.domain_rand.action_lag_timesteps_range[0],
-                                                  self.cfg.domain_rand.action_lag_timesteps_range[1]+1,(self.num_envs,),device=self.device) 
+                                                  int(self.action_lag_timesteps_range[1])+1,(self.num_envs,),device=self.device) 
         else:
             self.action_lag_timestep = torch.ones(self.num_envs,device=self.device) * self.cfg.domain_rand.action_lag_timesteps_range[0]
         
@@ -732,8 +732,8 @@ class LeggedRobot(BaseTask):
         # action lag
         if self.cfg.domain_rand.add_action_lag:   
             self.action_lag_buffer[env_ids,:,:] = 0.0
-            self.action_lag_timestep[env_ids] = torch.randint(self.cfg.domain_rand.action_lag_timesteps_range[0],
-                                                       self.cfg.domain_rand.action_lag_timesteps_range[1]+1,
+            self.action_lag_timestep[env_ids] = torch.randint(int(self.cfg.domain_rand.action_lag_timesteps_range[0]),
+                                                       int(self.action_lag_timesteps_range[1])+1,
                                                        (len(env_ids),),device=self.device) 
         # # prop lag
         # if self.cfg.domain_rand.add_prop_lag:
@@ -947,6 +947,7 @@ class LeggedRobot(BaseTask):
         self.obs_scales = self.cfg.normalization.obs_scales
         self.reward_scales = class_to_dict(self.cfg.rewards.scales)
         self.command_ranges = class_to_dict(self.cfg.commands.ranges)
+        self.action_lag_timesteps_range = self.cfg.domain_rand.action_lag_timesteps_range
      
 
         self.max_episode_length_s = self.cfg.env.episode_length_s
