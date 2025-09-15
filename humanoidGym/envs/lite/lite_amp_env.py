@@ -573,7 +573,7 @@ class LiteRobot(LeggedRobot):
         """
         # If the tracking reward is above 80% of the maximum, increase the range of commands
         if torch.mean(self.episode_sums["tracking_lin_vel"][env_ids]) / self.max_episode_length > 0.8 * self.reward_scales["tracking_lin_vel"]:
-            self.action_lag_timesteps_range[1] = np.clip(self.action_lag_timesteps_range[1] + 2, 0., self.cfg.domain_rand.max_lag_timesteps)
+            self.action_lag_timesteps_range[1] = np.clip(self.action_lag_timesteps_range[1] + 5, 0., self.cfg.domain_rand.max_lag_timesteps)
         
     
             
