@@ -208,21 +208,14 @@ def run_mujoco(policy, cfg):
                         + tau.tolist()
                         + acc.tolist()
                     )
-                elif action_count==stop_state_log:
-                    print('play log saved')
-                    np.savetxt('../analysis/data/play_log_sim2sim.csv', play_log, delimiter=',')
+               
 
                 action_count = action_count+1
 
-                # lcm->mujoco
-                # print("action_flt:")
-                #print("action_flt:",action_flt)
-                #print("q:",q)
-                #print("target_q:",target_q)
-            # cfg.control.exp_avg_decay = cfg.sim_config.dt * 50
+             
             action_flt=_low_pass_action_filter(action,action_flt,1)            
 
-            target_q = 1 * action_flt * cfg.control.action_scale + default_dof_pos
+            target_q = 1 * action_flt * cfg.control.action_scales + default_dof_pos
             target_q[4] = np.clip(target_q[4],-0.8,0.8)
             target_q[5] = np.clip(target_q[5],-0.4,0.4)
             target_q[10] = np.clip(target_q[10],-0.8,0.8)

@@ -33,6 +33,22 @@
                   "--checkpoint=2000",
               
             ]
+        },
+          {
+            "name": "play_lstm",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "humanoidGym/script/play_lstm.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--task", "lite_lstm_amp",
+                // "--rl_device=cpu",
+                // "--num_envs", "1",
+                // "--experiment_name","g1_vq",
+                //  "--num_envs", "16",
+                  "--experiment_name","action_lag"
+              
+            ]
         }
     ]
 }

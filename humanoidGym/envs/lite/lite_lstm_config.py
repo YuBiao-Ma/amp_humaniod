@@ -5,7 +5,7 @@ import glob
 MOTION_FILES = glob.glob('humanoidGym/datasets/lite/motion_amp_expert/new_data/*')
 
 
-class LiteAmpCfg( LeggedRobotCfg ):
+class LiteAmpLSTMCfg( LeggedRobotCfg ):
     class init_state( LeggedRobotCfg.init_state ):
         pos = [0, 0, 0.72] # x,y,z [m]
         orn = [0.0, 0.0, 0.0, 1.0]
@@ -31,10 +31,10 @@ class LiteAmpCfg( LeggedRobotCfg ):
         num_critic_single_observations = 53
        
         num_actions = 12
-        num_obs_lens = 51
-        critic_num_obs_lens = 5
+        num_obs_lens = 1
+        critic_num_obs_lens = 1
         num_observations = num_obs_lens * num_single_observations
-        num_privileged_obs = num_critic_single_observations*critic_num_obs_lens 
+        num_privileged_obs = num_critic_single_observations*critic_num_obs_lens #+ 187 
         
         reference_state_initialization = True
         reference_state_initialization_prob = 0.85
@@ -66,7 +66,7 @@ class LiteAmpCfg( LeggedRobotCfg ):
         kd_range = [0.8,1.2]
         
         add_action_lag = True
-        action_lag_timesteps_range = [0,15]#[10,40]#[0,30]
+        action_lag_timesteps_range = [0,10]#[10,40]#[0,30]
         max_lag_timesteps = 15
         
         randomize_restitution = False
@@ -92,46 +92,30 @@ class LiteAmpCfg( LeggedRobotCfg ):
         joint_viscous_range = [0.1, 0.9]  
         
     class terrain(LeggedRobotCfg.terrain):
-        # mesh_type = 'plane'
         mesh_type = 'plane'
+        #mesh_type = 'trimesh' # "heightfield" # none, plane, heightfield or trimesh
+        horizontal_scale = 0.1 # [m]
+        vertical_scale = 0.005 # [m]
+        border_size = 25 # [m]
         curriculum = False
+        static_friction = 1.0
+        dynamic_friction = 1.0
+        restitution = 0.
         # rough terrain only:
         measure_heights = False
-        # static_friction = 0.6
-        # dynamic_friction = 0.6
-        
-        static_friction = 0.6
-        dynamic_friction = 0.6
-        
+        measured_points_x = [-0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8] # 1mx1.6m rectangle (without center line)
+        measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]
+        selected = False # select a unique terrain type and pass all arguments
+        terrain_kwargs = None # Dict of arguments for selected terrain
+        max_init_terrain_level = 5 # starting curriculum state
         terrain_length = 8.
         terrain_width = 8.
-        num_rows = 10  # number of terrain rows (levels)
-        num_cols = 20  # number of terrain cols (types)
-        max_init_terrain_level = 5  # starting curriculum state
-        platform = 3.
-        
-        terrain_dict = {"flat": 0.05, 
-                        "rough flat": 0.05,
-                        "slope up": 0.075,
-                        "slope down": 0.075, 
-                        "rough slope up": 0.075,
-                        "rough slope down": 0.075, 
-                        "stairs up": 0.00, 
-                        "stairs down": 0.00,
-                        "discrete": 0.0}
-        
-        terrain_proportions = list(terrain_dict.values())
-
-        rough_flat_range = [0.005, 0.01]  # meter
-        slope_range = [0, 0.4]   # rad
-        rough_slope_range = [0.0, 0.05]
-        # stair_width_range = [0.50, 0.40]
-        stair_width_range = [0.35, 0.30]
-        stair_height_range = [0.10, 0.20]
-        # stair_height_range = [0.15, 0.20]
-        discrete_height_range = [0.05, 0.10]
-        restitution = 0.
-        fractal_noise_strength = 0.05
+        num_rows= 10 # number of terrain rows (levels)
+        num_cols = 20 # number of terrain cols (types)
+        # terrain types: [flat,up slope,down slope,discrite]
+        terrain_proportions = [0.2, 0.3, 0.3, 0.2]
+        # trimesh only:
+        slope_treshold = 0.75 # slopes above this threshold will be corrected to vertical surfaces
       
 
     class control( LeggedRobotCfg.control ):
@@ -190,25 +174,15 @@ class LiteAmpCfg( LeggedRobotCfg ):
             'ankle_roll': 0.03891, #0.000062254*25**2
         }
     
-    class noise:
-        add_noise = True
-        noise_level = 1.0 # scales other values
-        class noise_scales:
-            dof_pos = 0.02
-            dof_vel = 0.5#5.0#1.5
-            lin_vel = 0.1
-            ang_vel = 0.2
-            gravity = 0.05
-            height_measurements = 0.1
     
     class commands:
         curriculum = True
-        max_curriculum = 2.5
+        max_curriculum = 4
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         resampling_time = 10. # time before command are changed[s]
         heading_command = False#True # if true: compute         
         class ranges:
-            lin_vel_x = [-1, 2] # min max [m/s]            
+            lin_vel_x = [-1, 1] # min max [m/s]            
             lin_vel_y = [-0.8, 0.8]   # min max [m/s]
             ang_vel_yaw = [-1, 1]    # min max [rad/s]
             heading = [-3.14, 3.14]
@@ -266,7 +240,7 @@ class LiteAmpCfg( LeggedRobotCfg ):
             default_buffer_size_multiplier = 5
             contact_collection = 2 # 0: never, 1: last sub-step, 2: all sub-steps (default=2)
 
-class LiteAmpCfgPPO( LeggedRobotCfgPPO ):
+class LiteAmpCfgLSTMPPO( LeggedRobotCfgPPO ):
     runner_class_name = 'AmpOnPolicyRunner'
     class policy:
         init_noise_std = 0.8
