@@ -8,7 +8,6 @@ def train(args):
 
 if __name__ == '__main__':
     args = get_args()
-    args.num_envs = 2500
-    args.task="lite_amp"
-    args.experiment_name="action_lag"
+    # args.num_envs = 50
+    args.headless = True
     train(args)

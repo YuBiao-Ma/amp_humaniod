@@ -286,8 +286,10 @@ class AMPPPO:
             
             subtask_data
         ) in generator:
-            
-            hidden_states = [hid_states_batch[0],hid_states_batch[2]]
+            if self.actor_critic.is_recurrent:
+                hidden_states = [hid_states_batch[0],hid_states_batch[2]]
+            else:
+                hidden_states = None
             self.actor_critic.act(obs_batch,masks=masks_batch, hidden_states=hidden_states)
     
             actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
@@ -344,8 +346,8 @@ class AMPPPO:
 
             # # add subtask update in actor critic model
             if hasattr( self.actor_critic, 'update' ) and callable(self.actor_critic.update):
-                #subtask_loss = self.actor_critic.subtask_loss(obs_batch,critic_obs_batch[:,:3])#self.actor_critic.update(obs_batch,critic_obs_batch[:,:3])
-                subtask_loss = self.actor_critic.subtask_loss(subtask_data)
+                subtask_loss = self.actor_critic.subtask_loss(obs_batch,critic_obs_batch[:,:])#self.actor_critic.update(obs_batch,critic_obs_batch[:,:3])
+                # subtask_loss = self.actor_critic.subtask_loss(subtask_data)
                 loss+=subtask_loss
                 mean_subtask_loss += subtask_loss.item()
 

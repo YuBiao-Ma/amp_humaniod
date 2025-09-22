@@ -423,6 +423,53 @@ class LiteRobot(LeggedRobot):
         
         return env_ids, termination_privileged_obs
     
+    def _compute_torques(self, actions):
+        """ Compute torques from actions.
+            Actions can be interpreted as position or velocity targets given to a PD controller, or directly as scaled torques.
+            [NOTE]: torques must have the same dimension as the number of DOFs, even if some DOFs are not actuated.
+
+        Args:
+            actions (torch.Tensor): Actions
+
+        Returns:
+            [torch.Tensor]: Torques sent to the simulation
+        """
+        #pd controller
+        # actions_scaled = actions * self.cfg.control.action_scale
+ 
+        # if self.cfg.domain_rand.add_action_lag:
+        #     self.action_lag_buffer[:,:,1:] = self.action_lag_buffer[:,:,:self.cfg.domain_rand.action_lag_timesteps_range[1]].clone()
+        #     self.action_lag_buffer[:,:,0] = actions_scaled.clone()
+        #     lagged_actions_scaled = self.action_lag_buffer[torch.arange(self.num_envs),:,self.action_lag_timestep.long()]
+        # else:
+        #     lagged_actions_scaled = actions_scaled
+        
+        if self.cfg.domain_rand.randomize_gains:
+            p_gains = self.p_gains*self.randomized_p_gains
+            d_gains = self.d_gains*self.randomized_d_gains
+        else:
+            p_gains = self.p_gains
+            d_gains = self.d_gains
+            
+        self.target_dof_pos = actions + self.default_dof_pos
+        self.target_dof_pos[:,4] = torch.clip(self.target_dof_pos[:,4],-0.8,0.8)
+        self.target_dof_pos[:,5] = torch.clip(self.target_dof_pos[:,5],-0.4,0.4)
+        self.target_dof_pos[:,10] = torch.clip(self.target_dof_pos[:,10],-0.8,0.8)
+        self.target_dof_pos[:,11] = torch.clip(self.target_dof_pos[:,11],-0.4,0.4)
+
+        torques = p_gains*( self.target_dof_pos- self.dof_pos + self.motor_zero_offsets) - d_gains*self.dof_vel
+        
+        if self.cfg.domain_rand.randomize_coulomb_friction:
+            torques = torques - self.joint_viscous * self.dof_vel - self.joint_coulomb * torch.sign(self.dof_vel)
+
+        if self.cfg.domain_rand.randomize_motor_strength:
+            torques = torques*self.torque_multi
+            
+        if self.cfg.domain_rand.randomize_rfi:
+            torques += self.torque_limits*torch_rand_float(self.cfg.domain_rand.rfi_st[0], self.cfg.domain_rand.rfi_st[1],(self.num_envs, self.num_dofs), device=self.device) + self.rfi_ep_offest
+        
+        return torch.clip(torques, -self.torque_limits, self.torque_limits)
+
     def check_termination(self):
         """ Check if environments need to be reset
         """
@@ -573,7 +620,7 @@ class LiteRobot(LeggedRobot):
         """
         # If the tracking reward is above 80% of the maximum, increase the range of commands
         if torch.mean(self.episode_sums["tracking_lin_vel"][env_ids]) / self.max_episode_length > 0.8 * self.reward_scales["tracking_lin_vel"]:
-            self.action_lag_timesteps_range[1] = np.clip(self.action_lag_timesteps_range[1] + 5, 0., self.cfg.domain_rand.max_lag_timesteps)
+            self.action_lag_timesteps_range[1] = np.clip(self.action_lag_timesteps_range[1] + 3, 0., self.cfg.domain_rand.max_lag_timesteps)
         
     
             
@@ -642,8 +689,8 @@ class LiteRobot(LeggedRobot):
                             ),dim=-1)
         
         single_privileged_obs = torch.cat((
-                                    self.commands[:, :3] * self.commands_scale, #3 
                                     self.base_lin_vel * self.obs_scales.lin_vel, #3
+                                    self.commands[:, :3] * self.commands_scale, #3 
                                     self.base_ang_vel  * self.obs_scales.ang_vel, #3
                                     self.projected_gravity,#3
                                     (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,#21

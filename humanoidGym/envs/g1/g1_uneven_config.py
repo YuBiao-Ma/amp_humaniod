@@ -141,7 +141,7 @@ class G1UnevenAmpCfg( LeggedRobotCfg ):
         num_rows= 10 # number of terrain rows (levels)
         num_cols = 20 # number of terrain cols (types)
         # terrain types: [flat,up slope,down slope,discrite]
-        terrain_proportions = [0.2, 0.3, 0.3, 0.2]
+        terrain_proportions = [0.2, 0.0, 0.0, 0.0]
         # trimesh only:
         slope_treshold = 0.75 # slopes above this threshold will be corrected to vertical surfaces
       

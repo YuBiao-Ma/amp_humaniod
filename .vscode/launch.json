@@ -1,0 +1,38 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "train",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "humanoidGym/script/train.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--task", "lite_amp",
+                "--headless",
+                // "--checkpoint=2000",
+                // "--experiment_name","miniloong_vq",
+                // "--resume",
+            ]
+        },
+        {
+            "name": "play",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "humanoidGym/script/play.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--task", "lite_amp",
+                // "--rl_device=cpu",
+                // "--num_envs", "1",
+                // "--experiment_name","g1_vq",
+                 "--num_envs", "16",
+                  "--checkpoint=2000",
+              
+            ]
+        }
+    ]
+}

@@ -96,7 +96,7 @@ class AmpOnPolicyRunner:
         
         if self.empirical_normalization:
             # self.obs_normalizer = EmpiricalHistoryNormalization(shape=[self.env.cfg.env.num_single_observations], until=1.0e8).to(self.device)
-            self.obs_normalizer = EmpiricalNormalization(shape=[self.env.cfg.env.num_single_observations], until=1.0e8).to(self.device)
+            self.obs_normalizer = EmpiricalNormalization(shape=[self.env.cfg.env.num_observations], until=1.0e8).to(self.device)
             self.critic_obs_normalizer = EmpiricalNormalization(shape=[num_critic_obs], until=1.0e8).to(self.device)
         else:
             self.obs_normalizer = torch.nn.Identity().to(self.device)  # no normalization
@@ -138,7 +138,7 @@ class AmpOnPolicyRunner:
         
         # init normalize
         n,d = obs.size()
-        obs = self.obs_normalizer(obs.reshape(-1,self.env.cfg.env.num_single_observations)).reshape(n,d)
+        obs = self.obs_normalizer(obs.reshape(-1,self.env.cfg.env.num_observations)).reshape(n,d)
         critic_obs = self.critic_obs_normalizer(critic_obs)
         
         self.train_mode()  # switch to train mode (for dropout for example)
@@ -189,7 +189,7 @@ class AmpOnPolicyRunner:
 
                     # Normalize observations
                     n,d = obs.size()
-                    obs = self.obs_normalizer(obs.reshape(-1,self.env.cfg.env.num_single_observations)).reshape(n,d)
+                    obs = self.obs_normalizer(obs.reshape(-1,self.env.cfg.env.num_observations)).reshape(n,d)
                     
                     # Extract critic observations and normalize
                     if "critic" in infos["observations"]:
@@ -442,14 +442,17 @@ class AmpOnPolicyRunner:
         self.eval_mode()  # switch to evaluation mode (dropout for example)
         if device is not None:
             self.alg.actor_critic.to(device)
-        policy = self.alg.actor_critic.actor#actor_teacher_backbone
+        if self.alg.actor_critic.is_recurrent:
+            policy = self.alg.actor_critic.actor
+        else:
+            policy = self.alg.actor_critic.actor_teacher_backbone#actor_teacher_backbone
         if self.cfg["empirical_normalization"]:
             if device is not None:
                 self.obs_normalizer.to(device)
             if self.alg.actor_critic.is_recurrent:
                 policy = InferenceActorLSTM(self.alg.actor_critic.actor,self.obs_normalizer)
             else:
-                policy = InferenceActor(self.alg.actor_critic.actor,self.obs_normalizer)
+                policy = InferenceActor(self.alg.actor_critic.actor_teacher_backbone,self.obs_normalizer)
             policy.eval()
         return policy
 
