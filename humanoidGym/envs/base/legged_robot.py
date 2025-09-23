@@ -567,6 +567,8 @@ class LeggedRobot(BaseTask):
         self.phase_length_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
         self.target_dof_pos = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         
+        self.torque_max = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.action_scale_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         
         if self.cfg.terrain.measure_heights:
             self.height_points = self._init_height_points()
@@ -595,12 +597,15 @@ class LeggedRobot(BaseTask):
                 if dof_name in name:
                     self.p_gains[i] = self.cfg.control.stiffness[dof_name]
                     self.d_gains[i] = self.cfg.control.damping[dof_name]
+                    self.torque_max[i] = self.cfg.control.torque_max[dof_name]
                     found = True
             if not found:
                 self.p_gains[i] = 0.
                 self.d_gains[i] = 0.
+                self.torque_max[i] = 1
                 if self.cfg.control.control_type in ["P", "V"]:
                     print(f"PD gain of joint {name} were not defined, setting them to zero")
+        self.action_scale_gains = self.torque_max/self.p_gains
         self.default_dof_pos = self.default_dof_pos.unsqueeze(0)
         print(self.dof_dict)
         # history of observations

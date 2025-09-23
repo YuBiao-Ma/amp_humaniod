@@ -11,7 +11,7 @@
             "program": "humanoidGym/script/train.py",
             "console": "integratedTerminal",
             "args": [
-                "--task", "lite_amp",
+                "--task", "lite_lstm_amp",
                 "--headless",
                 // "--checkpoint=2000",
                 // "--experiment_name","miniloong_vq",

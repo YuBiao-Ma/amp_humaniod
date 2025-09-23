@@ -344,7 +344,7 @@ class LiteRobot(LeggedRobot):
             
         for _ in range(self.cfg.control.decimation):
             
-            actions_scaled = self.actions * self.action_scales
+            actions_scaled = self.actions * self.action_scales*self.action_scale_gains
  
             if self.cfg.domain_rand.add_action_lag:
                 self.action_lag_buffer[:,:,1:] = self.action_lag_buffer[:,:,:self.cfg.domain_rand.max_lag_timesteps].clone()

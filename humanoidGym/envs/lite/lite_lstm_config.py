@@ -122,25 +122,33 @@ class LiteAmpLSTMCfg( LeggedRobotCfg ):
         # PD Drive parameters:
         control_type = 'P'
         stiffness = {
-
-            'hip_pitch': 150, #277.56
-            'hip_roll': 400, #235.42
+            'hip_pitch': 280, #277.56
+            'hip_roll': 240, #235.42
             'hip_yaw': 150, #153.61           
-            'knee': 150, #277.56
-            'ankle_pitch': 30, #20.,
-            'ankle_roll': 30, #20.,
+            'knee': 280, #277.56
+            'ankle_pitch': 150, #20.,
+            'ankle_roll': 150, #20.,
         }  # [N*m/rad]
 
         damping = {
-                 
-         
-            'hip_pitch': 8,# 14.08,
-            'hip_roll': 10, # 11.92,
-            'hip_yaw': 8, # 9.82,
-            'knee': 8, # 14.08,
-            'ankle_pitch': 4, #1,
-            'ankle_roll': 4, #1,
+            'hip_pitch': 14,# 14.08,
+            'hip_roll': 12, # 11.92,
+            'hip_yaw': 10, # 9.82,
+            'knee': 14, # 14.08,
+            'ankle_pitch': 10, #1,
+            'ankle_roll': 10, #1,
         }
+
+        torque_max = {
+
+            'hip_pitch': 150.0, #0.25*150/280
+            'hip_roll': 140.0, #235.42
+            'hip_yaw': 60.0, #153.61           
+            'knee': 150.0, #277.56
+            'ankle_pitch': 60.0, #20.,
+            'ankle_roll': 60.0, #20.,
+        }  # [N*m/rad
+
 
         action_scales = 0.25
       
@@ -273,7 +281,7 @@ class LiteAmpCfgLSTMPPO( LeggedRobotCfgPPO ):
         policy_class_name = "ActorCriticRecurrent"
         max_iterations = 20000
         # run_name = 'vaild_g1_amp'
-        experiment_name = 'miniloong'
+        experiment_name = 'lite_lstm'
         
         amp_motion_files = MOTION_FILES
         amp_num_preload_transitions = 2000000
