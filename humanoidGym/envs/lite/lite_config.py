@@ -296,7 +296,7 @@ class LiteAmpCfgPPO( LeggedRobotCfgPPO ):
        
     class runner( LeggedRobotCfgPPO.runner ):
         empirical_normalization = True
-        policy_class_name = "ActorCriticRecurrent"
+        policy_class_name = "ActorCritic"
         max_iterations = 20000
         # run_name = 'vaild_g1_amp'
         experiment_name = 'miniloong'
