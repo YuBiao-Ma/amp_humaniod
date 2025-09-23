@@ -129,7 +129,6 @@ class LongAMPLoader:
         self.trajectory_weights = []  # 轨迹采样权重
         self.trajectory_frame_durations = []  # 单帧时长（秒）
         self.trajectory_num_frames = []  # 轨迹总帧数
-
         # 加载数据并截取39维目标数据（核心修改：适配新格式索引）
         for i, motion_file in enumerate(motion_files):
             self.trajectory_names.append(motion_file.split(".")[0])
