@@ -28,9 +28,10 @@
                 "--task", "lite_amp",
                 // "--rl_device=cpu",
                 // "--num_envs", "1",
-                // "--experiment_name","g1_vq",
+                // "--experiment_name","1",
+                "--load_run=9_26",
                  "--num_envs", "16",
-                  "--checkpoint=2000",
+                  "--checkpoint=14350",
               
             ]
         },

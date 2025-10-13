@@ -8,9 +8,14 @@ from humanoidGym.utils import  get_args, export_policy_as_jit, task_registry, Lo
 
 import numpy as np
 import torch
+import matplotlib
 
+# 无显示环境或服务器上运行时：强制使用无界面后端
+if not os.environ.get("DISPLAY"):
+    matplotlib.use("Agg")          # ★ 在 import pyplot 之前
+# 不要工具栏，避免 Tk 创建图标
+matplotlib.rcParams['toolbar'] = 'None'
 import matplotlib.pyplot as plt
-
 from humanoidGym.utils.helpers import export_policy_as_rnn_jit
 
 def play(args):
@@ -51,7 +56,7 @@ def play(args):
     policy = ppo_runner.get_inference_policy(device=env.device)
 
     # ====== rollout 配置 ======
-    STEPS = 300
+    STEPS = 3000
     REC_ENV_ID = 0  # 记录第0个环境
 
     # NEW: 分别为 target_dof_pos 与 dof_pos 建两个缓冲

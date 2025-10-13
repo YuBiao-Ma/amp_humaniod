@@ -224,13 +224,13 @@ For more information, please see http://wiki.ros.org/sw_urdf_exporter
 		</collision>
 		-->
 		<collision>
-		<origin xyz="-0.10 0.025 -0.03" rpy="0 0 0"/>
+		<origin xyz="-0.05 0.025 -0.03" rpy="0 0 0"/>
 		<geometry>
 			<sphere radius="0.005"/>
 		</geometry>
 		</collision>
 		<collision>
-		<origin xyz="-0.10 -0.025 -0.03" rpy="0 0 0"/>
+		<origin xyz="-0.05 -0.025 -0.03" rpy="0 0 0"/>
 		<geometry>
 			<sphere radius="0.005"/>
 		</geometry>
@@ -447,13 +447,13 @@ For more information, please see http://wiki.ros.org/sw_urdf_exporter
 		</collision>
 		-->
 		<collision>
-		<origin xyz="-0.10 0.025 -0.03" rpy="0 0 0"/>
+		<origin xyz="-0.05 0.025 -0.03" rpy="0 0 0"/>
 		<geometry>
 			<sphere radius="0.005"/>
 		</geometry>
 		</collision>
 		<collision>
-		<origin xyz="-0.10 -0.025 -0.03" rpy="0 0 0"/>
+		<origin xyz="-0.05 -0.025 -0.03" rpy="0 0 0"/>
 		<geometry>
 			<sphere radius="0.005"/>
 		</geometry>
