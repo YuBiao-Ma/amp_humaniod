@@ -9,12 +9,27 @@ class LiteAmpCfg( LeggedRobotCfg ):
     class init_state( LeggedRobotCfg.init_state ):
         pos = [0, 0, 0.72] # x,y,z [m]
         orn = [0.0, 0.0, 0.0, 1.0]
+        # default_joint_angles = {
+        #     'joint_left_hip_pitch': 0.39,   # [rad]
+        #     'joint_left_hip_roll':  -0.0,   # [rad]
+        #     'joint_left_hip_yaw':   -0.12,   # [rad]
+        #     'joint_left_knee':  0.74,   # [rad]
+        #     'joint_left_ankle_pitch': 0.36,   # [rad] 
+        #     'joint_left_ankle_roll': 0,   # [rad]
+
+        #     'joint_right_hip_pitch': 0.39,   # [rad]
+        #     'joint_right_hip_roll':  -0.0,   # [rad]
+        #     'joint_right_hip_yaw':   -0.12,   # [rad]
+        #     'joint_right_knee':  0.74,   # [rad]
+        #     'joint_right_ankle_pitch': 0.36,   # [rad]
+        #     'joint_right_ankle_roll': 0,   # [rad]
+        # }
         default_joint_angles = {
-            'joint_left_hip_pitch': 0.39,   # [rad]
+            'joint_left_hip_pitch': 0.24,   # [rad]
             'joint_left_hip_roll':  -0.0,   # [rad]
-            'joint_left_hip_yaw':   -0.12,   # [rad]
-            'joint_left_knee':  0.74,   # [rad]
-            'joint_left_ankle_pitch': 0.36,   # [rad] 
+            'joint_left_hip_yaw':   0.12,   # [rad]
+            'joint_left_knee':  0.3,   # [rad]
+            'joint_left_ankle_pitch': 0.155,   # [rad] 
             'joint_left_ankle_roll': 0,   # [rad]
 
             'joint_right_hip_pitch': 0.39,   # [rad]
@@ -37,6 +52,21 @@ class LiteAmpCfg( LeggedRobotCfg ):
             'joint_right_hip_yaw':   -0.12,   # [rad]
             'joint_right_knee':  0.74,   # [rad]
             'joint_right_ankle_pitch': 0.36,   # [rad]
+            'joint_right_ankle_roll': 0,   # [rad]
+        }
+        target_joint_angles = {
+            'joint_left_hip_pitch': 0.39,   # [rad]
+            'joint_left_hip_roll':  -0.0,   # [rad]
+            'joint_left_hip_yaw':   -0.12,   # [rad]
+            'joint_left_knee':  0.74,   # [rad]
+            'joint_left_ankle_pitch': 0.36,   # [rad] 
+            'joint_left_ankle_roll': 0,   # [rad]
+
+            'joint_right_hip_pitch': 0.24,   # [rad]
+            'joint_right_hip_roll':  -0.0,   # [rad]
+            'joint_right_hip_yaw':   0.12,   # [rad]
+            'joint_right_knee':  0.3,   # [rad]
+            'joint_right_ankle_pitch': 0.155,   # [rad]
             'joint_right_ankle_roll': 0,   # [rad]
         }
     
@@ -170,7 +200,31 @@ class LiteAmpCfg( LeggedRobotCfg ):
         #     'ankle_pitch': 10, #1,
         #     'ankle_roll': 10, #1,
         # }
+        # stiffness = {
+        #     'hip_pitch': 280, #277.56
+        #     'hip_roll': 240, #235.42
+        #     'hip_yaw': 150, #153.61           
+        #     'knee': 280, #277.56
+        #     'ankle_pitch': 150, #20.,
+        #     'ankle_roll': 150, #20.,
+        # }  # [N*m/rad]
+
+        # damping = {
+        #     'hip_pitch': 14,# 14.08,
+        #     'hip_roll': 12, # 11.92,
+        #     'hip_yaw': 10, # 9.82,
+        #     'knee': 14, # 14.08,
+        #     'ankle_pitch': 10, #1,
+        #     'ankle_roll': 10, #1,
+        # }
         stiffness = {
+          
+            'hip_pitch': 150, #100.,
+            'hip_roll': 150, #100.,
+            'hip_yaw': 150, #100.,            
+            'knee': 150, #150.,
+            'ankle_pitch': 40, #20.,
+            'ankle_roll': 40, #20.,
           
             'hip_pitch': 150, #100.,
             'hip_roll': 150, #100.,
@@ -187,7 +241,15 @@ class LiteAmpCfg( LeggedRobotCfg ):
             'knee': 5, # 2,
             'ankle_pitch': 2.5, #1,
             'ankle_roll': 2.5, #1,
+                 
+            'hip_pitch': 5,# 1.2,
+            'hip_roll': 5, # 1.2,
+            'hip_yaw': 5, # 1.2,
+            'knee': 5, # 2,
+            'ankle_pitch': 2.5, #1,
+            'ankle_roll': 2.5, #1,
         }
+
 
 
         torque_max = {
@@ -203,6 +265,8 @@ class LiteAmpCfg( LeggedRobotCfg ):
 
         action_scales = 0.25
       
+        decimation = 20
+        use_filter = True
         decimation = 20
         use_filter = True
         exp_avg_decay = 0.05
@@ -276,12 +340,14 @@ class LiteAmpCfg( LeggedRobotCfg ):
             ankle_roll_energy = 0.1
             
            
+           
                 
             dof_vel_limits = -0.1
             dof_pos_limits = -10.
             dof_torque_limits = -1
             
     class sim:
+        dt =  0.001
         dt =  0.001
         substeps = 1
         gravity = [0., 0. ,-9.81]  # [m/s^2]

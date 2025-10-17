@@ -169,7 +169,7 @@ def run_mujoco(policy, cfg):
 
             # 简单命令时序
             if count_lowlevel < 2000:
-                cmd.vx, cmd.vy, cmd.dyaw = 1.0, 0.0, 0.0
+                cmd.vx, cmd.vy, cmd.dyaw = 2, 0.0, 0.0
             elif count_lowlevel < 4000:
                 cmd.vx, cmd.vy, cmd.dyaw = 0.0, 0.0, 0.0
             elif count_lowlevel < 6000:
@@ -235,7 +235,7 @@ def run_mujoco(policy, cfg):
 
         # 低通滤波 + PD 控制
         action_flt = _low_pass_action_filter(action, action_flt, 1.0)
-        target_q = 1.0 * action_flt * cfg.control.action_scale + default_dof_pos
+        target_q = 1.0 * action_flt * cfg.control.action_scales + default_dof_pos
         target_q[4]  = np.clip(target_q[4],  -0.8, 0.8)
         target_q[5]  = np.clip(target_q[5],  -0.4, 0.4)
         target_q[10] = np.clip(target_q[10], -0.8, 0.8)
