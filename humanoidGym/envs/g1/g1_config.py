@@ -2,7 +2,7 @@
 from humanoidGym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
 import glob
 
-MOTION_FILES = glob.glob('humanoidGym/datasets/mocap_motions/*')
+MOTION_FILES = glob.glob('humanoidGym/datasets/g1/mocap_motions/*')
 
 ARMATURE_5020 = 0.003609725
 ARMATURE_7520_14 = 0.010177520
@@ -53,6 +53,34 @@ class G1AmpCfg( LeggedRobotCfg ):
             'right_shoulder_yaw_joint':  0.2,
             'right_elbow_joint':         0.3,
         }
+
+        target_joint_angles = { # = target angles [rad] when action = 0.0
+           'left_hip_pitch_joint':      -0.1,
+           'left_hip_roll_joint':        0.0,
+           'left_hip_yaw_joint':         0.0,
+           'left_knee_joint':            0.3,
+           'left_ankle_pitch_joint':    -0.2,
+           'left_ankle_roll_joint':      0.0,
+
+            'right_hip_pitch_joint':    -0.1,
+            'right_hip_roll_joint':      0.0,
+            'right_hip_yaw_joint':       0.0,
+            'right_knee_joint':          0.3,
+            'right_ankle_pitch_joint':  -0.2,
+            'right_ankle_roll_joint':    0.0,
+          
+            'waist_yaw_joint':           0.0,
+
+            'left_shoulder_pitch_joint': 0.5,
+            'left_shoulder_roll_joint':  0.2,
+            'left_shoulder_yaw_joint':  -0.2,
+            'left_elbow_joint':          0.3,
+            
+            'right_shoulder_pitch_joint':0.5,
+            'right_shoulder_roll_joint':-0.2,
+            'right_shoulder_yaw_joint':  0.2,
+            'right_elbow_joint':         0.3,
+        }
     
     class env(LeggedRobotCfg.env):
         num_envs = 5480
@@ -60,10 +88,10 @@ class G1AmpCfg( LeggedRobotCfg ):
         num_critic_single_observations = 80
        
         num_actions = 21
-        num_obs_lens = 1
-        critic_num_obs_lens = 1
+        num_obs_lens = 51
+        critic_num_obs_lens = 5
         num_observations = num_obs_lens * num_single_observations
-        num_privileged_obs = num_critic_single_observations*critic_num_obs_lens #+ 187 
+        num_privileged_obs = num_critic_single_observations*critic_num_obs_lens 
         
         reference_state_initialization = True
         reference_state_initialization_prob = 0.85
@@ -343,7 +371,7 @@ class G1AmpCfgPPO( LeggedRobotCfgPPO ):
             
     class runner( LeggedRobotCfgPPO.runner ):
         empirical_normalization = True
-        policy_class_name = "ActorCriticRecurrent"
+        policy_class_name = "ActorCritic"
         max_iterations = 20000
         run_name = 'vaild_g1_amp'
         experiment_name = 'g1'

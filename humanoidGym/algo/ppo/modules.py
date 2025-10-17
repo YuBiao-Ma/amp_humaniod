@@ -10482,7 +10482,7 @@ class MlpVqvaeLongEstLayerNormFallPredictRegressionActor(nn.Module):
     
     def reshape_critic(self,critic_obs_hist_flatten):
         # height = critic_obs_hist_flatten[:,:187]
-        critic_obs_hist = critic_obs_hist_flatten.reshape(-1,5,53)# add 3 for baselin
+        critic_obs_hist = critic_obs_hist_flatten.reshape(-1,5,80)# add 3 for baselin
         return critic_obs_hist
 
     def forward(self,obs_hist_flatten):

@@ -7,7 +7,7 @@ from typing import Union
 from torch.utils.tensorboard import SummaryWriter
 import torch
 
-# from humanoidGym.algo.dataset.motion_loader import AMPLoader
+from humanoidGym.algo.dataset.motion_loader import AMPLoader
 from humanoidGym.algo.dataset.lite_motion_loader import LongAMPLoader
 from humanoidGym.algo.ppo.discriminator import Discriminator
 
@@ -45,7 +45,7 @@ class AmpOnPolicyRunner:
                                                         **self.policy_cfg).to(self.device)
         
         # amp related
-        amp_data = LongAMPLoader(
+        amp_data = AMPLoader(
             device, time_between_frames=self.env.dt, preload_transitions=True,
             num_preload_transitions=train_cfg['runner']['amp_num_preload_transitions'],
             motion_files=self.cfg["amp_motion_files"])

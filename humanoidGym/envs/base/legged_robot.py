@@ -310,8 +310,8 @@ class LeggedRobot(BaseTask):
                 props["friction"][i] *= self.joint_friction_coeffs[env_id]
             if self.cfg.domain_rand.randomize_joint_damping:
                 props["damping"][i] = self.joint_damping_coeffs[env_id]
-            if self.cfg.domain_rand.randomize_joint_armature:
-                props["armature"][i] = self.joint_armatures[env_id]
+            # if self.cfg.domain_rand.randomize_joint_armature:
+                # props["armature"][i] = self.joint_armatures[env_id]
              
         return props
 
@@ -601,7 +601,6 @@ class LeggedRobot(BaseTask):
                 if dof_name in name:
                     self.p_gains[i] = self.cfg.control.stiffness[dof_name]
                     self.d_gains[i] = self.cfg.control.damping[dof_name]
-                    self.torque_max[i] = self.cfg.control.torque_max[dof_name]
                     found = True
             if not found:
                 self.p_gains[i] = 0.
