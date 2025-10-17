@@ -57,6 +57,9 @@ class LeggedRobotCfg(BaseConfig):
         default_joint_angles = { # target angles when action = 0.0
             "joint_a": 0., 
             "joint_b": 0.}
+        target_joint_angles = { # target angles when action = 0.0
+            "joint_a": 0., 
+            "joint_b": 0.}
 
     class control:
         control_type = 'P' # P: position, V: velocity, T: torques

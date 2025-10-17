@@ -584,13 +584,17 @@ class LeggedRobot(BaseTask):
                                             device=self.device, requires_grad=False)
         # joint positions offsets and PD gains
         self.default_dof_pos = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
+        self.target_joint_angles = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         self.dof_dict = {}
         
         for i in range(self.num_dofs):
             name = self.dof_names[i]
             angle = self.cfg.init_state.default_joint_angles[name]
+            target_angels  = self.cfg.init_state.target_joint_angles[name]
+            
             self.dof_dict[name] = i      
             self.default_dof_pos[i] = angle
+            self.target_joint_angles[i] = target_angels
             
             found = False
             for dof_name in self.cfg.control.stiffness.keys():
@@ -607,7 +611,7 @@ class LeggedRobot(BaseTask):
                     print(f"PD gain of joint {name} were not defined, setting them to zero")
         self.action_scale_gains = self.torque_max/self.p_gains
         self.default_dof_pos = self.default_dof_pos.unsqueeze(0)
-        print(self.dof_dict)
+        self.target_joint_angles = self.target_joint_angles.unsqueeze(0)
         # history of observations
         self.obs_history = deque(maxlen=self.cfg.env.num_obs_lens)
         self.critic_obs_history = deque(maxlen=self.cfg.env.critic_num_obs_lens)

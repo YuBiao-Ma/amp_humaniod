@@ -24,6 +24,21 @@ class LiteAmpCfg( LeggedRobotCfg ):
             'joint_right_ankle_pitch': 0.36,   # [rad]
             'joint_right_ankle_roll': 0,   # [rad]
         }
+        target_joint_angles = {
+            'joint_left_hip_pitch': 0.39,   # [rad]
+            'joint_left_hip_roll':  -0.0,   # [rad]
+            'joint_left_hip_yaw':   -0.12,   # [rad]
+            'joint_left_knee':  0.74,   # [rad]
+            'joint_left_ankle_pitch': 0.36,   # [rad] 
+            'joint_left_ankle_roll': 0,   # [rad]
+
+            'joint_right_hip_pitch': 0.39,   # [rad]
+            'joint_right_hip_roll':  -0.0,   # [rad]
+            'joint_right_hip_yaw':   -0.12,   # [rad]
+            'joint_right_knee':  0.74,   # [rad]
+            'joint_right_ankle_pitch': 0.36,   # [rad]
+            'joint_right_ankle_roll': 0,   # [rad]
+        }
     
     class env(LeggedRobotCfg.env):
         num_envs = 5480
@@ -47,16 +62,16 @@ class LiteAmpCfg( LeggedRobotCfg ):
         friction_range = [0.25, 1.75]
         
         randomize_base_mass = True
-        added_mass_range = [-1., 1.]
+        added_mass_range = [-1., 3.]
         
         push_robots = True
         push_interval_s = 5
-        max_push_vel_xy = 0.3
+        max_push_vel_xy = 1
         
         randomize_com = True
-        com_x = [-0.03,0.03]
-        com_y = [-0.03,0.03]
-        com_z = [-0.03,0.03]
+        com_x = [-0.05,0.05]
+        com_y = [-0.05,0.05]
+        com_z = [-0.05,0.05]
         
         randomize_motor_strength = True
         motor_strength = [0.8,1.2]
@@ -84,7 +99,7 @@ class LiteAmpCfg( LeggedRobotCfg ):
         randomize_joint_damping = True
         joint_damping_range = [0.3, 1.5]
 
-        randomize_joint_armature = True
+        randomize_joint_armature = False
         joint_armature_range = [0.8, 1.2]    
         
         randomize_coulomb_friction = False
@@ -138,23 +153,42 @@ class LiteAmpCfg( LeggedRobotCfg ):
        
         # PD Drive parameters:
         control_type = 'P'
-        stiffness = {
-            'hip_pitch': 280, #277.56
-            'hip_roll': 240, #235.42
-            'hip_yaw': 150, #153.61           
-            'knee': 280, #277.56
-            'ankle_pitch': 150, #20.,
-            'ankle_roll': 150, #20.,
-        }  # [N*m/rad]
+        # stiffness = {
+        #     'hip_pitch': 280, #277.56
+        #     'hip_roll': 240, #235.42
+        #     'hip_yaw': 150, #153.61           
+        #     'knee': 280, #277.56
+        #     'ankle_pitch': 150, #20.,
+        #     'ankle_roll': 150, #20.,
+        # }  # [N*m/rad]
 
+        # damping = {
+        #     'hip_pitch': 14,# 14.08,
+        #     'hip_roll': 12, # 11.92,
+        #     'hip_yaw': 10, # 9.82,
+        #     'knee': 14, # 14.08,
+        #     'ankle_pitch': 10, #1,
+        #     'ankle_roll': 10, #1,
+        # }
+        stiffness = {
+          
+            'hip_pitch': 150, #100.,
+            'hip_roll': 150, #100.,
+            'hip_yaw': 150, #100.,            
+            'knee': 150, #150.,
+            'ankle_pitch': 40, #20.,
+            'ankle_roll': 40, #20.,
+        }  # [N*m/rad]
         damping = {
-            'hip_pitch': 14,# 14.08,
-            'hip_roll': 12, # 11.92,
-            'hip_yaw': 10, # 9.82,
-            'knee': 14, # 14.08,
-            'ankle_pitch': 10, #1,
-            'ankle_roll': 10, #1,
+                 
+            'hip_pitch': 5,# 1.2,
+            'hip_roll': 5, # 1.2,
+            'hip_yaw': 5, # 1.2,
+            'knee': 5, # 2,
+            'ankle_pitch': 2.5, #1,
+            'ankle_roll': 2.5, #1,
         }
+
 
         torque_max = {
 
@@ -169,8 +203,8 @@ class LiteAmpCfg( LeggedRobotCfg ):
 
         action_scales = 0.25
       
-        decimation = 4
-        use_filter = False
+        decimation = 20
+        use_filter = True
         exp_avg_decay = 0.05
 
     class asset( LeggedRobotCfg.asset ):
@@ -221,33 +255,34 @@ class LiteAmpCfg( LeggedRobotCfg ):
             tracking_lin_vel = 3.0
             tracking_ang_vel = 1.5
             base_acc = 0.2
-            #alive = 0.05
+            action_smooth = -0.01
+        
            
             #正则化
-            stand_still = -1
-            orientation = -1
-            base_height = 0.2
-            # action_rate = -0.01
-            action_smooth = -0.01
+            stand_still = -2
+          
+            
             foot_slip = -0.1
             feet_contact_forces = 0.01
-            # exp_energy = 0.05
-            power_dist = -2e-5
+            # feet_air_time = 5
+      
+            # power_dist = -2e-5
             torques = -0.00001
-            dof_vel = -1e-4
+            power = -1e-5
+            dof_vel = -1e-5
             dof_acc = -2.5e-7
+            
             ankle_pitch_energy = 0.1
             ankle_roll_energy = 0.1
             
-            # hip_action_pitch = -0.05
-            # ankle_action_roll = -0.1     
+           
                 
             dof_vel_limits = -0.1
             dof_pos_limits = -10.
             dof_torque_limits = -1
             
     class sim:
-        dt =  0.005
+        dt =  0.001
         substeps = 1
         gravity = [0., 0. ,-9.81]  # [m/s^2]
         up_axis = 1  # 0 is y, 1 is z
