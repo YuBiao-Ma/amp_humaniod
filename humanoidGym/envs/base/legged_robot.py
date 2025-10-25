@@ -4,18 +4,13 @@ import numpy as np
 import os
 from collections import deque
 
-
 from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
-
 
 import torch
 from torch import Tensor
 from typing import Tuple, Dict
 import torch.nn.functional as F
-
-
-
 
 from humanoidGym.envs.base.base_task import BaseTask
 from humanoidGym.utils.math import wrap_to_pi
@@ -310,8 +305,8 @@ class LeggedRobot(BaseTask):
                 props["friction"][i] *= self.joint_friction_coeffs[env_id]
             if self.cfg.domain_rand.randomize_joint_damping:
                 props["damping"][i] = self.joint_damping_coeffs[env_id]
-            # if self.cfg.domain_rand.randomize_joint_armature:
-                # props["armature"][i] = self.joint_armatures[env_id]
+            if self.cfg.domain_rand.randomize_joint_armature:
+                props["armature"][i] = self.joint_armatures[env_id]
              
         return props
 
@@ -438,12 +433,15 @@ class LeggedRobot(BaseTask):
         if self.custom_origins:
             self.root_states[env_ids] = self.base_init_state
             self.root_states[env_ids, :3] += self.env_origins[env_ids]
-            self.root_states[env_ids, :2] += torch_rand_float(-1., 1., (len(env_ids), 2), device=self.device) # xy position within 1m of the center
+            self.root_states[env_ids, :1] += torch_rand_float(-0.3, 0.3, (len(env_ids), 1), device=self.device) # xy position within 1m of the center
         else:
             self.root_states[env_ids] = self.base_init_state
             self.root_states[env_ids, :3] += self.env_origins[env_ids]
+        
+         
+        
         # base velocities
-        self.root_states[env_ids, 7:13] = torch_rand_float(-0.5, 0.5, (len(env_ids), 6), device=self.device) # [7:10]: lin vel, [10:13]: ang vel
+        # self.root_states[env_ids, 7:13] = torch_rand_float(-0.5, 0.5, (len(env_ids), 6), device=self.device) # [7:10]: lin vel, [10:13]: ang vel
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                      gymtorch.unwrap_tensor(self.root_states),
@@ -565,10 +563,6 @@ class LeggedRobot(BaseTask):
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
         self.rand_push_force = torch.zeros((self.num_envs, 3), dtype=torch.float32, device=self.device)
         self.phase_length_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
-        self.target_dof_pos = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
-        
-        self.torque_max = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
-        self.action_scale_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         
         if self.cfg.terrain.measure_heights:
             self.height_points = self._init_height_points()
@@ -584,17 +578,13 @@ class LeggedRobot(BaseTask):
                                             device=self.device, requires_grad=False)
         # joint positions offsets and PD gains
         self.default_dof_pos = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
-        self.target_joint_angles = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         self.dof_dict = {}
         
         for i in range(self.num_dofs):
             name = self.dof_names[i]
             angle = self.cfg.init_state.default_joint_angles[name]
-            target_angels  = self.cfg.init_state.target_joint_angles[name]
-            
             self.dof_dict[name] = i      
             self.default_dof_pos[i] = angle
-            self.target_joint_angles[i] = target_angels
             
             found = False
             for dof_name in self.cfg.control.stiffness.keys():
@@ -605,12 +595,10 @@ class LeggedRobot(BaseTask):
             if not found:
                 self.p_gains[i] = 0.
                 self.d_gains[i] = 0.
-                self.torque_max[i] = 1
                 if self.cfg.control.control_type in ["P", "V"]:
                     print(f"PD gain of joint {name} were not defined, setting them to zero")
-        self.action_scale_gains = self.torque_max/self.p_gains
         self.default_dof_pos = self.default_dof_pos.unsqueeze(0)
-        self.target_joint_angles = self.target_joint_angles.unsqueeze(0)
+        print(self.dof_dict)
         # history of observations
         self.obs_history = deque(maxlen=self.cfg.env.num_obs_lens)
         self.critic_obs_history = deque(maxlen=self.cfg.env.critic_num_obs_lens)
@@ -676,7 +664,8 @@ class LeggedRobot(BaseTask):
             self.joint_damping_coeffs = torch_rand_float(self.cfg.domain_rand.joint_damping_range[0], self.cfg.domain_rand.joint_damping_range[1], (self.num_envs, 1), device=self.device)
         
         if self.cfg.domain_rand.randomize_joint_armature:
-            self.joint_armature_coeffs = torch_rand_float(self.cfg.domain_rand.joint_armature_range[0], self.cfg.domain_rand.joint_armature_range[1], (self.num_envs, self.num_dof), device=self.device)
+            self.joint_armatures = torch_rand_float(self.cfg.domain_rand.joint_armature_range[0], self.cfg.domain_rand.joint_armature_range[1], (self.num_envs, 1), device=self.device)
+        
         
     def init_post_randomize_props(self):
         ''' Initialize torch tensors for random properties
@@ -724,9 +713,9 @@ class LeggedRobot(BaseTask):
     def init_randomize_lag(self):
         # action lag
         if self.cfg.domain_rand.add_action_lag:   
-            self.action_lag_buffer = torch.zeros(self.num_envs,self.num_actions,self.cfg.domain_rand.max_lag_timesteps+1,device=self.device)
+            self.action_lag_buffer = torch.zeros(self.num_envs,self.num_actions,self.cfg.domain_rand.action_lag_timesteps_range[1]+1,device=self.device)
             self.action_lag_timestep = torch.randint(self.cfg.domain_rand.action_lag_timesteps_range[0],
-                                                  int(self.action_lag_timesteps_range[1])+1,(self.num_envs,),device=self.device) 
+                                                  self.cfg.domain_rand.action_lag_timesteps_range[1]+1,(self.num_envs,),device=self.device) 
         else:
             self.action_lag_timestep = torch.ones(self.num_envs,device=self.device) * self.cfg.domain_rand.action_lag_timesteps_range[0]
         
@@ -742,8 +731,8 @@ class LeggedRobot(BaseTask):
         # action lag
         if self.cfg.domain_rand.add_action_lag:   
             self.action_lag_buffer[env_ids,:,:] = 0.0
-            self.action_lag_timestep[env_ids] = torch.randint(int(self.cfg.domain_rand.action_lag_timesteps_range[0]),
-                                                       int(self.action_lag_timesteps_range[1])+1,
+            self.action_lag_timestep[env_ids] = torch.randint(self.cfg.domain_rand.action_lag_timesteps_range[0],
+                                                       self.cfg.domain_rand.action_lag_timesteps_range[1]+1,
                                                        (len(env_ids),),device=self.device) 
         # # prop lag
         # if self.cfg.domain_rand.add_prop_lag:
@@ -938,7 +927,10 @@ class LeggedRobot(BaseTask):
             self.terrain_types = torch.div(torch.arange(self.num_envs, device=self.device), (self.num_envs/self.cfg.terrain.num_cols), rounding_mode='floor').to(torch.long)
             self.max_terrain_level = self.cfg.terrain.num_rows
             self.terrain_origins = torch.from_numpy(self.terrain.env_origins).to(self.device).to(torch.float)
-            self.env_origins[:] = self.terrain_origins[self.terrain_levels, self.terrain_types]
+            self.env_origins[:] = self.terrain_origins[(self.terrain_levels), self.terrain_types]
+            self.env_origins[:, 2] += 0.0
+
+            
         else:
             self.custom_origins = False
             self.env_origins = torch.zeros(self.num_envs, 3, device=self.device, requires_grad=False)
@@ -957,7 +949,6 @@ class LeggedRobot(BaseTask):
         self.obs_scales = self.cfg.normalization.obs_scales
         self.reward_scales = class_to_dict(self.cfg.rewards.scales)
         self.command_ranges = class_to_dict(self.cfg.commands.ranges)
-        self.action_lag_timesteps_range = self.cfg.domain_rand.action_lag_timesteps_range
      
 
         self.max_episode_length_s = self.cfg.env.episode_length_s

@@ -134,6 +134,7 @@ def get_args():
         {"name": "--num_envs", "type": int, "help": "Number of environments to create. Overrides config file if provided."},
         {"name": "--seed", "type": int, "help": "Random seed. Overrides config file if provided."},
         {"name": "--max_iterations", "type": int, "help": "Maximum number of training iterations. Overrides config file if provided."},
+        {"name": "--terrain", "type": str, "default": "climb", "help": 'Only for play'},
     ]
     # parse arguments
     args = gymutil.parse_arguments(
@@ -168,6 +169,18 @@ def export_policy_as_jit(env,actor_critic,path,filename='policy'):
             'output': {0: 'batch_size'}
         }
     )
+
+def export_policy_as_jit_wmp(actor_critic, path):
+    if hasattr(actor_critic, 'memory_a'):
+        # assumes LSTM: TODO add GRU
+        exporter = PolicyExporterLSTM(actor_critic)
+        exporter.export(path)
+    else: 
+        os.makedirs(path, exist_ok=True)
+        path = os.path.join(path, 'policy_wmp.pt')
+        model = copy.deepcopy(actor_critic.actor).to('cpu')
+        traced_script_module = torch.jit.script(model)
+        traced_script_module.save(path)
     
     # traced_script_module = torch.jit.script(model)
     # traced_script_module.save(pt_path)

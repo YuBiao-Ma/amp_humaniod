@@ -11,12 +11,9 @@
             "program": "humanoidGym/script/train.py",
             "console": "integratedTerminal",
             "args": [
-                "--task", "g1_amp",
-                "--headless",
-                "--num_envs=1500"
-                // "--checkpoint=2000",
-                // "--experiment_name","miniloong_vq",
-                // "--resume",
+                "--task", "g1_height_amp",
+                // "--headless",
+              
             ]
         },
         {
@@ -26,29 +23,34 @@
             "program": "humanoidGym/script/play.py",
             "console": "integratedTerminal",
             "args": [
-                "--task", "lite_amp",
+                "--task", "g1_height_amp",
                 // "--rl_device=cpu",
                 // "--num_envs", "1",
                 // "--experiment_name","1",
-                "--load_run=9_26",
-                 "--num_envs", "16",
-                  "--checkpoint=14350",
+                // "--load_run=Oct21_02-04-57_vaild_g1_amp",
+                //  "--num_envs", "16",
+                //   "--checkpoint=9500",
+
               
             ]
         },
           {
-            "name": "play_lstm",
+            "name": "play_wmp",
             "type": "debugpy",
             "request": "launch",
-            "program": "humanoidGym/script/play_lstm.py",
+            "program": "humanoidGym/script/play_wmp.py",
             "console": "integratedTerminal",
             "args": [
-                "--task", "lite_lstm_amp",
+                "--task", "g1_image_amp",
+                // "--terrain=climb"
                 // "--rl_device=cpu",
                 // "--num_envs", "1",
-                // "--experiment_name","g1_vq",
+                // "--experiment_name","1",
+                // "--load_run=Oct18_19-44-43_vaild_g1_amp",
                 //  "--num_envs", "16",
-                  "--experiment_name","action_lag"
+                //   "--checkpoint=1100",
+                // "--terrain=crawl"
+
               
             ]
         }

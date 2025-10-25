@@ -53,34 +53,6 @@ class G1AmpCfg( LeggedRobotCfg ):
             'right_shoulder_yaw_joint':  0.2,
             'right_elbow_joint':         0.3,
         }
-
-        target_joint_angles = { # = target angles [rad] when action = 0.0
-           'left_hip_pitch_joint':      -0.1,
-           'left_hip_roll_joint':        0.0,
-           'left_hip_yaw_joint':         0.0,
-           'left_knee_joint':            0.3,
-           'left_ankle_pitch_joint':    -0.2,
-           'left_ankle_roll_joint':      0.0,
-
-            'right_hip_pitch_joint':    -0.1,
-            'right_hip_roll_joint':      0.0,
-            'right_hip_yaw_joint':       0.0,
-            'right_knee_joint':          0.3,
-            'right_ankle_pitch_joint':  -0.2,
-            'right_ankle_roll_joint':    0.0,
-          
-            'waist_yaw_joint':           0.0,
-
-            'left_shoulder_pitch_joint': 0.5,
-            'left_shoulder_roll_joint':  0.2,
-            'left_shoulder_yaw_joint':  -0.2,
-            'left_elbow_joint':          0.3,
-            
-            'right_shoulder_pitch_joint':0.5,
-            'right_shoulder_roll_joint':-0.2,
-            'right_shoulder_yaw_joint':  0.2,
-            'right_elbow_joint':         0.3,
-        }
     
     class env(LeggedRobotCfg.env):
         num_envs = 5480
@@ -88,10 +60,10 @@ class G1AmpCfg( LeggedRobotCfg ):
         num_critic_single_observations = 80
        
         num_actions = 21
-        num_obs_lens = 51
-        critic_num_obs_lens = 5
+        num_obs_lens = 1
+        critic_num_obs_lens = 1
         num_observations = num_obs_lens * num_single_observations
-        num_privileged_obs = num_critic_single_observations*critic_num_obs_lens 
+        num_privileged_obs = num_critic_single_observations*critic_num_obs_lens #+ 187 
         
         reference_state_initialization = True
         reference_state_initialization_prob = 0.85
@@ -148,7 +120,7 @@ class G1AmpCfg( LeggedRobotCfg ):
         joint_viscous_range = [0.1, 0.9]  
         
     class terrain(LeggedRobotCfg.terrain):
-        mesh_type = 'plane'
+        mesh_type = 'trimesh'
         #mesh_type = 'trimesh' # "heightfield" # none, plane, heightfield or trimesh
         horizontal_scale = 0.1 # [m]
         vertical_scale = 0.005 # [m]
@@ -267,22 +239,23 @@ class G1AmpCfg( LeggedRobotCfg ):
         # only_positive_rewards = False
         class scales( LeggedRobotCfg.rewards.scales ):
             tracking_lin_vel = 3.0
-            tracking_ang_vel = 1.0
+            tracking_ang_vel = 1.5
             base_acc = 0.2
             #alive = 0.05
             
             #正则化
-            # stand_still = -1
+            stand_still = -1
             # action_rate = -0.01
             action_smooth = -0.01
             foot_slip = -0.1
             feet_contact_forces = 0.01
-            exp_energy = 0.05
+            # exp_energy = 0.05
+            power_dist = -2e-5
             torques = -0.00001
             dof_vel = -1e-4
             dof_acc = -2.5e-7
-            # ankle_pitch_energy = 0.1
-            # ankle_roll_energy = 0.1
+            ankle_pitch_energy = 0.1
+            ankle_roll_energy = 0.1
             # ankle_action_pitch = -0.05
             # ankle_action_roll = -0.1     
                 
@@ -371,7 +344,7 @@ class G1AmpCfgPPO( LeggedRobotCfgPPO ):
             
     class runner( LeggedRobotCfgPPO.runner ):
         empirical_normalization = True
-        policy_class_name = "ActorCritic"
+        policy_class_name = "ActorCriticRecurrent"
         max_iterations = 20000
         run_name = 'vaild_g1_amp'
         experiment_name = 'g1'

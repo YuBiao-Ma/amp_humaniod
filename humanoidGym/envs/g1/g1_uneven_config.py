@@ -2,7 +2,8 @@
 from humanoidGym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
 import glob
 
-MOTION_FILES = glob.glob('humanoidGym/datasets/mocap_motions/*')
+
+MOTION_FILES = glob.glob('humanoidGym/datasets/g1/mocap_motions/*')
 
 ARMATURE_5020 = 0.003609725
 ARMATURE_7520_14 = 0.010177520
@@ -55,7 +56,7 @@ class G1UnevenAmpCfg( LeggedRobotCfg ):
         }
     
     class env(LeggedRobotCfg.env):
-        num_envs = 5480
+        num_envs = 4096
         num_single_observations = 72
         num_critic_single_observations = 80
        
@@ -64,8 +65,9 @@ class G1UnevenAmpCfg( LeggedRobotCfg ):
         critic_num_obs_lens = 1
         num_observations = num_obs_lens * num_single_observations
         num_privileged_obs = num_critic_single_observations*critic_num_obs_lens + 187 
-        
-        reference_state_initialization = True
+      
+        forward_height_dim = 525
+        reference_state_initialization = False
         reference_state_initialization_prob = 0.85
         amp_motion_files = MOTION_FILES
         
@@ -119,32 +121,65 @@ class G1UnevenAmpCfg( LeggedRobotCfg ):
         joint_coulomb_range = [0.1, 1.0]
         joint_viscous_range = [0.1, 0.9]   
         
-    class terrain(LeggedRobotCfg.terrain):
-        #mesh_type = 'plane'
-        mesh_type = 'trimesh' # "heightfield" # none, plane, heightfield or trimesh
-        horizontal_scale = 0.1 # [m]
-        vertical_scale = 0.005 # [m]
-        border_size = 25 # [m]
+    class terrain:
+        mesh_type = 'trimesh'  # "heightfield" # none, plane, heightfield or trimesh
+        horizontal_scale = 0.1  # [m]
+        vertical_scale = 0.005  # [m]
+        border_size = 25  # [m]
         curriculum = True
         static_friction = 1.0
         dynamic_friction = 1.0
         restitution = 0.
         # rough terrain only:
         measure_heights = True
-        measured_points_x = [-0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8] # 1mx1.6m rectangle (without center line)
+        measured_points_x = [-0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7,
+                             0.8]  # 1mx1.6m rectangle (without center line)
         measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]
-        selected = False # select a unique terrain type and pass all arguments
-        terrain_kwargs = None # Dict of arguments for selected terrain
-        max_init_terrain_level = 5 # starting curriculum state
+
+        # 525 dim, for depth image prediction
+        measured_forward_points_x = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
+                                     1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9,
+                                     2.0]  # 1mx1.6m rectangle (without center line)
+        measured_forward_points_y = [-1.2, -1.1, -1.0, -0.9, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.,
+                                     0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2]
+
+
+        selected = False  # select a unique terrain type and pass all arguments
+        terrain_kwargs = None  # Dict of arguments for selected terrain
+        max_init_terrain_level = 0  # starting curriculum state
         terrain_length = 8.
         terrain_width = 8.
-        num_rows= 10 # number of terrain rows (levels)
-        num_cols = 20 # number of terrain cols (types)
-        # terrain types: [flat,up slope,down slope,discrite]
-        terrain_proportions = [0.2, 0.0, 0.0, 0.0]
+        num_rows = 10  # number of terrain rows (levels)
+        num_cols = 20  # number of terrain cols (types)
+        # terrain types: [wave, rough slope, stairs up, stairs down, discrete, gap, pit, tilt, crawl, rough_flat]
+        terrain_proportions = [0.0, 0.05, 0.15, 0.15, 0.0, 0.25, 0.25, 0.05, 0.05, 0.05]
         # trimesh only:
-        slope_treshold = 0.75 # slopes above this threshold will be corrected to vertical surfaces
-      
+        slope_treshold = 0.75  # slopes above this threshold will be corrected to vertical surfaces
+
+    class depth:
+        use_camera = True
+        camera_num_envs = 1024
+        camera_terrain_num_rows = 10
+        camera_terrain_num_cols = 20
+
+        position = [0.03, 0.00, 0.35]  # front camera
+        y_angle = [25, 30]  # positive pitch down
+        z_angle = [0, 0]
+        x_angle = [0, 0]
+
+        update_interval = 5  # 5 works without retraining, 8 worse
+
+        original = (64, 64)
+        resized = (64, 64)
+        horizontal_fov = 38#58
+        buffer_len = 2
+
+        near_clip = 1
+        far_clip = 3
+        dis_noise = 0.0
+
+        scale = 1
+        invert = True
 
     class control( LeggedRobotCfg.control ):
         # PD Drive parameters:
@@ -222,15 +257,15 @@ class G1UnevenAmpCfg( LeggedRobotCfg ):
     
     class commands:
         curriculum = True
-        max_curriculum = 3
+        max_curriculum = 2.5
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         resampling_time = 10. # time before command are changed[s]
         heading_command = True # if true: compute         
         class ranges:
-            lin_vel_x = [-1, 2.5] # min max [m/s]      
-            lin_vel_y = [-0.8, 0.8]   # min max [m/s]
+            lin_vel_x = [0.0, 1.0] # min max [m/s]      
+            lin_vel_y = [-0.0, 0.0]   # min max [m/s]
             ang_vel_yaw = [-1, 1]    # min max [rad/s]
-            heading = [-3.14, 3.14]
+            heading = [0, 0]
   
     class rewards( LeggedRobotCfg.rewards ):
         soft_dof_pos_limit = 1.0 # percentage of urdf limits, values above this limit are penalized
@@ -238,27 +273,42 @@ class G1UnevenAmpCfg( LeggedRobotCfg ):
         soft_torque_limit = 0.8
         base_height_target = 0.78
         max_contact_force = 500
+        reward_curriculum = True
+        reward_curriculum_term = ["feet_edge"]
+        reward_curriculum_schedule = [[4000, 10000, 0.1, 1.0]]
         # only_positive_rewards = False
         class scales( LeggedRobotCfg.rewards.scales ):
             tracking_lin_vel = 3.0
-            tracking_ang_vel = 1.0
+            tracking_ang_vel = 1.5
             base_acc = 0.2
             #alive = 0.05
             
             #正则化
-            # stand_still = -1
+            stand_still = -1
             # action_rate = -0.01
             action_smooth = -0.01
             foot_slip = -0.1
             feet_contact_forces = 0.01
-            exp_energy = 0.05
+            # exp_energy = 0.05
+            power_dist = -2e-5
             torques = -0.00001
             dof_vel = -1e-4
             dof_acc = -2.5e-7
-            # ankle_pitch_energy = 0.1
-            # ankle_roll_energy = 0.1
+            ankle_pitch_energy = 0.1
+            ankle_roll_energy = 0.1
             # ankle_action_pitch = -0.05
-            # ankle_action_roll = -0.1     
+            # ankle_action_roll = -0.1    
+            yaw_error_when_rate_matches = -0.1
+            stumble = -5.0
+            # termination = -10
+                
+            dof_vel_limits = -0.1
+            dof_pos_limits = -10.
+            dof_torque_limits = -1
+
+            feet_edge = -0.5
+            cheat = -0.5
+     
                 
             dof_vel_limits = -0.1
             dof_pos_limits = -10.
@@ -284,10 +334,17 @@ class G1UnevenAmpCfg( LeggedRobotCfg ):
             contact_collection = 2 # 0: never, 1: last sub-step, 2: all sub-steps (default=2)
 
 class G1UnevenAmpCfgPPO( LeggedRobotCfgPPO ):
-    runner_class_name = 'AmpOnPolicyRunner'
+    runner_class_name = 'WMPRunner'
     class policy:
-        init_noise_std = 0.8
+        encoder_hidden_dims = [256, 128]
+        wm_encoder_hidden_dims = [64, 64]
+        actor_hidden_dims = [256, 128, 64]
+        critic_hidden_dims = [512, 256, 128]
+        latent_dim = 32 + 3
+        wm_latent_dim = 32
         activation = 'elu'
+
+       
         
     class discriminator:
         reward_coef = 2.0#1.0
@@ -296,7 +353,7 @@ class G1UnevenAmpCfgPPO( LeggedRobotCfgPPO ):
         shape = [512, 256]
 
     class algorithm( LeggedRobotCfgPPO.algorithm ):
-        entropy_coef = 0.01
+        entropy_coef = 0.005
         max_grad_norm = 1
         
         amp_replay_buffer_size = 1000000
@@ -308,7 +365,7 @@ class G1UnevenAmpCfgPPO( LeggedRobotCfgPPO ):
         discriminator_loss_function = "PairwiseLoss" # MSELoss, BCEWithLogitsLoss, WassersteinLoss PairwiseLoss WassersteinTanhLoss 
         discriminator_num_mini_batches = 80
         
-        class_name = 'AMPPPO'
+        class_name = 'WMPPPO'
         
         #Random Network Distillation
         # class rnd_cfg:
@@ -343,13 +400,21 @@ class G1UnevenAmpCfgPPO( LeggedRobotCfgPPO ):
         #     mirror_loss_coeff=1
             
     class runner( LeggedRobotCfgPPO.runner ):
-        empirical_normalization = True
-        policy_class_name = "ActorCriticRecurrent"
-        max_iterations = 20000
+        empirical_normalization = False
+        policy_class_name = "ActorCriticRecurrentWMP"
+        max_iterations = 30000
         run_name = 'vaild_g1_amp'
-        experiment_name = 'g1'
+        experiment_name = 'g1_image'
         
         amp_motion_files = MOTION_FILES
         amp_num_preload_transitions = 2000000
         normalize_style_reward = True
-        
+    
+    class depth_predictor:
+        lr = 3e-4
+        weight_decay = 1e-4
+        training_interval = 10
+        training_iters = 1000
+        batch_size = 1024
+        loss_scale = 100
+        train_start_steps = 10000

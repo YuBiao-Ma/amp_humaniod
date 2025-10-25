@@ -7,8 +7,9 @@ import sys
 
 from humanoidGym.algo import VecEnv
 from humanoidGym.algo.ppo.on_policy_runner import OnPolicyRunner
+from humanoidGym.algo.ppo.wmp_runner import WMPRunner
 from humanoidGym.algo.ppo.amp_on_policy_runner import AmpOnPolicyRunner
-
+from humanoidGym.algo.ppo.amp_on_policy_runner_image import AmpOnPolicyRunnerImage
 from humanoidGym import GYM_ROOT_DIR, GYM_ENVS_DIR
 from .helpers import get_args, update_cfg_from_args, class_to_dict, get_load_path, set_seed, parse_sim_params
 from humanoidGym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO

@@ -27,7 +27,7 @@ def resolve_nn_activation(act_name: str) -> torch.nn.Module:
         raise ValueError(f"Invalid activation function '{act_name}'.")
 
 
-def split_and_pad_trajectories(tensor, dones):
+def split_and_pad_trajectories_bk(tensor, dones):
     """Splits trajectories at done indices. Then concatenates them and pads with zeros up to the length og the longest trajectory.
     Returns masks corresponding to valid parts of the trajectories
     Example:
@@ -64,6 +64,47 @@ def split_and_pad_trajectories(tensor, dones):
 
     trajectory_masks = trajectory_lengths > torch.arange(0, tensor.shape[0], device=tensor.device).unsqueeze(1)
     return padded_trajectories, trajectory_masks
+
+def split_and_pad_trajectories(tensor, dones):
+    """
+    通用版：支持 [T, B, *feat_dims]，*feat_dims 可以是 [F] 或 [H, W, C] 等任意维度。
+    返回:
+      padded_trajectories: [T_max, N_traj, *feat_dims]
+      trajectory_masks:    [T_max, N_traj]  (True=有效)
+    """
+    dones = dones.clone()
+    dones[-1] = 1  # 强制最后一步收尾
+
+    # 计算每条轨迹长度（先把 [T,B] -> [B,T] 然后拉平为 [B*T,1]）
+    flat_dones = dones.transpose(1, 0).reshape(-1, 1)
+    done_indices = torch.cat(
+        (flat_dones.new_tensor([-1], dtype=torch.int64),
+         flat_dones.nonzero(as_tuple=False)[:, 0])
+    )
+    trajectory_lengths = done_indices[1:] - done_indices[:-1]
+    trajectory_lengths_list = trajectory_lengths.tolist()
+
+    # 把数据按 [B, T, ...] 重排，再展平为 [B*T, *feat_dims]，再按长度切段
+    flat = tensor.transpose(1, 0).flatten(0, 1)  # [B*T, *feat_dims]
+    trajectories = torch.split(flat, trajectory_lengths_list)
+
+    # 关键修复：补一个零轨迹，形状要与每段一致 => [T, *feat_dims]
+    pad_shape = (tensor.shape[0],) + tensor.shape[2:]   # (T, *feat_dims)
+    zero_traj = torch.zeros(pad_shape, device=tensor.device, dtype=tensor.dtype)
+    trajectories = trajectories + (zero_traj,)
+
+    # 用 pad_sequence 按长度对齐 -> [T_max, N_traj+1, *feat_dims]
+    padded_trajectories = torch.nn.utils.rnn.pad_sequence(trajectories)
+
+    # 去掉上面人为补的那一条 -> [T_max, N_traj, *feat_dims]
+    padded_trajectories = padded_trajectories[:, :-1]
+
+    # 有效位掩码 -> [T_max, N_traj]
+    T = tensor.shape[0]
+    trajectory_masks = trajectory_lengths > torch.arange(0, T, device=tensor.device).unsqueeze(1)
+
+    return padded_trajectories, trajectory_masks
+
 
 
 def unpad_trajectories(trajectories, masks):

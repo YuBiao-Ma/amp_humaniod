@@ -346,8 +346,8 @@ class AMPPPO:
 
             # # add subtask update in actor critic model
             if hasattr( self.actor_critic, 'update' ) and callable(self.actor_critic.update):
-                subtask_loss = self.actor_critic.subtask_loss(obs_batch,critic_obs_batch[:,:])#self.actor_critic.update(obs_batch,critic_obs_batch[:,:3])
-                # subtask_loss = self.actor_critic.subtask_loss(subtask_data)
+                # subtask_loss = self.actor_critic.subtask_loss(obs_batch,critic_obs_batch[:,:])#self.actor_critic.update(obs_batch,critic_obs_batch[:,:3])
+                subtask_loss = self.actor_critic.subtask_loss(subtask_data)
                 loss+=subtask_loss
                 mean_subtask_loss += subtask_loss.item()
 

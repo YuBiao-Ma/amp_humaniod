@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F 
 import math
 import random
+import numpy as np
+from humanoidGym.algo.dreamer import tools
 
 import os
 import copy
@@ -7724,6 +7726,11 @@ class PureVqvaeEMA(nn.Module):
         z = F.normalize(z)
         return z
     
+    def get_onehot_encode(self,input):
+        z = self.encode(input)
+        quantize,onehot_encode = self.quantizer(z)
+        return onehot_encode
+        
     def decode(self,quantized,z):
         quantized = z + (quantized - z).detach()
         input_hat = self.decoder(quantized)
@@ -10432,7 +10439,7 @@ class MlpVqvaeLongEstLayerNormFallPredictRegressionActor(nn.Module):
         self.num_prop = num_prop
         self.num_hist = num_hist
         
-        self.actor = nn.Sequential(nn.Linear(latent_dim + (num_prop) + 3 + 32 ,512),
+        self.actor = nn.Sequential(nn.Linear(latent_dim + (num_prop-9) + 4 + 4 + 32 + 3,512),
                                    nn.ELU(),
                                    nn.Linear(512,256),
                                    nn.ELU(),
@@ -10441,20 +10448,20 @@ class MlpVqvaeLongEstLayerNormFallPredictRegressionActor(nn.Module):
                                    nn.ELU(),
                                    nn.Linear(128,num_actions))
        
-        self.Vae = PureVqvaeEMA(in_dim=num_prop,output_dim=num_prop,num_emb=128)
+        self.Vae = PureVqvaeEMA(in_dim=num_prop-9,output_dim=num_prop-9,num_emb=128)
         
-        self.long_encoder = StateHistoryEncoder(input_size=num_prop,
+        self.long_encoder = StateHistoryEncoder(input_size=num_prop-9,
                                              tsteps = num_hist-1,
                                              output_size=16)
         
-        self.short_encoder = nn.Sequential(nn.Linear((num_prop)*5,128),
+        self.short_encoder = nn.Sequential(nn.Linear((num_prop-9)*5,128),
                                            nn.ELU(),
                                            nn.Linear(128,64),
                                            nn.ELU(),
                                            nn.Linear(64,16),
                                            nn.ELU())
         
-        self.estimator_backbone = nn.Sequential(nn.Linear((num_prop)*5,128),
+        self.estimator_backbone = nn.Sequential(nn.Linear((num_prop-9)*5,128),
                                           nn.ELU(),
                                           nn.Linear(128,64),
                                           nn.ELU())
@@ -10466,7 +10473,14 @@ class MlpVqvaeLongEstLayerNormFallPredictRegressionActor(nn.Module):
         self.predict_vel_layer = nn.Sequential(nn.Linear(64+16,32),
                                    nn.ELU(),
                                    nn.Linear(32,3))
-
+        
+        self.predict_contact_layer = nn.Sequential(nn.Linear(64+16,32),
+                                   nn.ELU(),
+                                   nn.Linear(32,2))
+        
+        self.predict_gravity_vec_layer = nn.Sequential(nn.Linear(64+16,32),
+                                   nn.ELU(),
+                                   nn.Linear(32,3))
         
         self.random = 1
         
@@ -10481,24 +10495,26 @@ class MlpVqvaeLongEstLayerNormFallPredictRegressionActor(nn.Module):
         return obs_hist
     
     def reshape_critic(self,critic_obs_hist_flatten):
-        # height = critic_obs_hist_flatten[:,:187]
-        critic_obs_hist = critic_obs_hist_flatten.reshape(-1,5,80)# add 3 for baselin
-        return critic_obs_hist
+        height = critic_obs_hist_flatten[:,:187]
+        critic_obs_hist = critic_obs_hist_flatten[:,187:].reshape(-1,5,50 + 19 + 6 + 1)# add 3 for baselin
+        return critic_obs_hist,height
 
     def forward(self,obs_hist_flatten):
         obs_hist = self.reshape(obs_hist_flatten)
         b,_,_ = obs_hist.size()
         
-        short_hist_flatten = obs_hist[:,-5:,:].reshape(b,-1)
+        short_hist_flatten = obs_hist[:,-5:,9:].reshape(b,-1)
         short_encode = self.short_encoder(short_hist_flatten)
-        long_encode = self.long_encoder(obs_hist[:,1:,:]) #remove linvel and command
+        long_encode = self.long_encoder(obs_hist[:,1:,9:]) #remove linvel and command
         
         with torch.no_grad():
             encode = torch.cat([self.estimator_backbone(short_hist_flatten),long_encode],dim=-1)
             latents = self.predict_latent_layer(encode)
             predicted_vel = self.predict_vel_layer(encode)
+            predicted_contact = self.predict_contact_layer(encode)
+            predicted_grad_vec = self.predict_gravity_vec_layer(encode)
             
-        actor_input = torch.cat([short_encode,long_encode,latents.detach(),predicted_vel.detach(),obs_hist[:,-1,:]],dim=-1) # remove linvel
+        actor_input = torch.cat([short_encode,long_encode,latents.detach(),predicted_vel.detach(),predicted_contact.detach(),predicted_grad_vec.detach(),obs_hist[:,-1,9:],obs_hist[:,-1,3:6]],dim=-1) # remove linvel
         mean  = self.actor(actor_input)
     
         return mean
@@ -10506,28 +10522,31 @@ class MlpVqvaeLongEstLayerNormFallPredictRegressionActor(nn.Module):
     def VaeLoss(self,obs_hist_flatten,critic_obs_flatten):
         
         obs_hist = self.reshape(obs_hist_flatten)
-        critic_hist = self.reshape_critic(critic_obs_flatten)
+        critic_hist,height = self.reshape_critic(critic_obs_flatten)
         b,l,_ = obs_hist.size()
         
         # VAE update
-        vae_input = obs_hist[:,:,:].reshape(b*l,-1)
+        vae_input = obs_hist[:,:,9:].reshape(b*l,-1)
         recon,quantize,z,onehot_encode = self.Vae(vae_input)
         loss = self.Vae.loss_fn(vae_input,recon,quantize,z,onehot_encode)
         
         # regression
         with torch.no_grad():
-            _,_,future_latent,_ = self.Vae(obs_hist[:,-1,:])
-            long_encode = self.long_encoder(obs_hist[:,:-1,:])
+            _,_,future_latent,_ = self.Vae(obs_hist[:,-1,9:])
+            long_encode = self.long_encoder(obs_hist[:,:-1,9:])
         
-        encode = torch.cat([self.estimator_backbone(obs_hist[:,-6:-1,:].reshape(b,-1)),long_encode],dim=-1)
+        encode = torch.cat([self.estimator_backbone(obs_hist[:,-6:-1,9:].reshape(b,-1)),long_encode],dim=-1)
         predict_latent = self.predict_latent_layer(encode)
         predict_vel = self.predict_vel_layer(encode)
+        predict_contact = self.predict_contact_layer(encode)
+        predict_gra_vec = self.predict_gravity_vec_layer(encode)
         
         latent_loss = F.mse_loss(predict_latent,future_latent)
-        mseloss = F.mse_loss(predict_vel,critic_hist[:,-1,:3].detach())
-      
+        mseloss = F.mse_loss(predict_vel,obs_hist[:,-2,:3].detach())
+        contact_loss = F.mse_loss(predict_contact,critic_hist[:,-2,-2:].detach())
+        gravity_loss = F.mse_loss(predict_gra_vec,critic_hist[:,-1,6:9].detach())
 
-        loss = loss + mseloss + latent_loss 
+        loss = loss + mseloss + latent_loss + contact_loss + gravity_loss
         return loss
     
 class MlpVqvaeLongEstLayerNormCmdScaledRegressionActor(nn.Module):
@@ -12606,7 +12625,7 @@ class RnnNextSiamNormActor(nn.Module):
         super(RnnNextSiamNormActor,self).__init__()
         self.num_prop = num_prop
         self.num_est = 3 + 32
-        self.num_height = 0#187
+        self.num_height = 187 #修改为187当在不平地形上训练,否则则为0
         self.num_priv = 5
         self.rnn_type = rnn_type
         self.rnn_num_layers = rnn_num_layers
@@ -12717,3 +12736,581 @@ class RnnNextSiamNormActor(nn.Module):
         loss = siam_loss + mseloss
         return loss
     
+class RnnTerrianLatentActor(nn.Module):
+    def __init__(self,
+                 num_prop,
+                 actor_dims,
+                 num_actions,
+                 activation,
+                 rnn_num_hidden,
+                 rnn_type='gru',
+                 rnn_num_layers=1) -> None:
+        
+        super(RnnTerrianLatentActor,self).__init__()
+        self.num_prop = num_prop
+        self.num_est = 3 + 16
+        self.num_height = 187 
+        self.num_height_encode = 128
+        self.num_priv = 5
+        self.rnn_type = rnn_type
+        self.rnn_num_layers = rnn_num_layers
+        self.rnn_num_hidden = rnn_num_hidden 
+        
+        self.actor = nn.Sequential(nn.ELU(),
+                                   nn.Linear(rnn_num_hidden,512),
+                                   nn.ELU(),
+                                   nn.Linear(512,256),
+                                   nn.ELU(),
+                                   nn.Linear(256,128),
+                                   nn.ELU(),
+                                   nn.Linear(128,num_actions))
+        
+        self.rnn = Memory(num_prop+self.num_est, type=rnn_type, num_layers=rnn_num_layers, hidden_size=rnn_num_hidden)
+        
+        # estimator
+        self.Vae = PureVqvaeEMA(in_dim=self.num_height,output_dim=self.num_height,num_emb=self.num_height_encode)
+        
+        self.est_rnn = Memory(num_prop, type=rnn_type, num_layers=rnn_num_layers, hidden_size=rnn_num_hidden)
+        
+        self.predict_vel_layer = nn.Sequential(
+                                   nn.ELU(),
+                                   nn.Linear(rnn_num_hidden,128),
+                                   nn.ELU(),
+                                   nn.Linear(128,64),
+                                   nn.ELU(),
+                                   nn.Linear(64,3))
+        
+        self.predict_terrian_layer = nn.Sequential(
+                                   nn.ELU(),
+                                   nn.Linear(rnn_num_hidden,128),
+                                   nn.ELU(),
+                                   nn.Linear(128,64),
+                                   nn.ELU(),
+                                   nn.Linear(64,16))
+        
+        self.predict_onehot_layer = nn.Sequential(nn.ELU(),
+                                           nn.Linear(16,256),
+                                           nn.ELU(),
+                                           nn.Linear(256,self.num_height_encode))
+        
+        self.random = 1
+        
+    def set_random(self,random):
+        self.random = random
+        
+    def forward(self,observations, masks=None, hidden_states=None):
+
+        if hidden_states:
+            with torch.no_grad():
+                est_encode = self.est_rnn(observations,masks,hidden_states[1],False)
+                predicted_vel = self.predict_vel_layer(est_encode)
+                predicted_terrian = self.predict_terrian_layer(est_encode)
+            
+            
+            
+            actor_input = torch.cat([observations,predicted_vel.detach(),predicted_terrian.detach()],dim=-1)
+            encode = self.rnn(actor_input,masks,hidden_states[0]).squeeze(0)
+            mean  = self.actor(encode)
+        else:
+            with torch.no_grad():
+                est_encode = self.est_rnn(observations,masks,hidden_states)
+                predicted_vel = self.predict_vel_layer(est_encode).squeeze(0)
+                predicted_terrian = self.predict_terrian_layer(est_encode).squeeze(0)
+                
+            actor_input = torch.cat([observations,predicted_vel.detach(),predicted_terrian.detach()],dim=-1)
+            encode = self.rnn(actor_input,masks,hidden_states).squeeze(0)
+            mean  = self.actor(encode)
+    
+        return mean
+    
+    def depoly_forward(self, obs, est_hidden, hidden):
+        
+        est_encode,est_next_hidden = self.est_rnn.depoly_inference(obs,est_hidden)
+        predicted_vel = self.predict_vel_layer(est_encode)
+        predicted_height = self.predict_terrian_layer(est_encode)
+        predicted_onehot_encode = self.predict_onehot_layer(predicted_height).reshape(-1,128).contiguous()
+        pred_class = torch.argmax(predicted_onehot_encode, dim=-1) 
+        print(f'地形类别：{pred_class[0]}')
+
+        actor_input = torch.cat([obs,predicted_vel,predicted_height],dim=-1)
+        encode, next_hidden= self.rnn.depoly_inference(actor_input,hidden)
+        
+        mean  = self.actor(encode.squeeze(0))
+        return mean, est_next_hidden, next_hidden
+    
+    def Loss(self,subtask_data):
+        obs_batch, critic_obs_batch, next_critic_obs_batch, hid_e_batch, masks_batch = subtask_data
+        
+        # get terrian type and speed target
+        critic_obs_unpad_batch = unpad_trajectories(critic_obs_batch,masks_batch)
+        cur_vel_target = critic_obs_unpad_batch[...,self.num_height+3:self.num_height+6]
+        
+        # get hidden
+        hidden = self.est_rnn(obs_batch,masks_batch,hid_e_batch)
+        predicted_vel = self.predict_vel_layer(hidden).squeeze(0)
+        predicted_terrian_latent = self.predict_terrian_layer(hidden).squeeze(0)
+        
+        # update VQVAE
+        height = critic_obs_unpad_batch[...,:self.num_height].reshape(-1,self.num_height).contiguous()
+        recon,quantize,z,onehot_encode = self.Vae(height)
+        rec_loss = self.Vae.loss_fn(height,recon,quantize,z,onehot_encode)
+        
+        # predict encode    
+        predicted_onehot_encode = self.predict_onehot_layer(predicted_terrian_latent).reshape(-1,128).contiguous()
+        target = torch.argmax(onehot_encode.clone().detach(),dim=-1)
+
+        cls_loss = F.cross_entropy(predicted_onehot_encode,target)  
+        mseloss = F.mse_loss(predicted_vel,cur_vel_target.detach())
+        loss = cls_loss + mseloss + rec_loss
+        return loss
+    
+
+class RnnTerrianImageActor(nn.Module):
+    def __init__(self,
+                 num_prop,
+                 actor_dims,
+                 num_actions,
+                 activation,
+                 rnn_num_hidden,
+                 rnn_type='gru',
+                 rnn_num_layers=1,
+                 wm_encoder_hidden_dims = [64, 32],
+                 wm_feature_dim = 512,
+                 wm_latent_dim = 32,) -> None:
+        
+        super(RnnTerrianImageActor,self).__init__()
+        self.num_prop = num_prop
+        self.num_est = 3 + 16
+        self.num_height = 187 
+        self.num_height_encode = 128
+        self.num_priv = 5
+        self.rnn_type = rnn_type
+        self.rnn_num_layers = rnn_num_layers
+        self.rnn_num_hidden = rnn_num_hidden 
+
+
+         #RnnTerrianLatentActor
+        # World Model Feature Encoder
+        # wm_encoder_layers = []
+        # wm_encoder_layers.append(nn.Linear(wm_feature_dim, wm_encoder_hidden_dims[0]))
+        # wm_encoder_layers.append(activation)
+        # for l in range(len(wm_encoder_hidden_dims)):
+        #     if l == len(wm_encoder_hidden_dims) - 1:
+        #         wm_encoder_layers.append(nn.Linear(wm_encoder_hidden_dims[l], wm_latent_dim))
+        #     else:
+        #         wm_encoder_layers.append(nn.Linear(wm_encoder_hidden_dims[l], wm_encoder_hidden_dims[l + 1]))
+        #         wm_encoder_layers.append(activation)
+        # self.wm_feature_encoder = nn.Sequential(*wm_encoder_layers)
+
+        
+        self.actor = nn.Sequential(nn.ELU(),
+                                   nn.Linear(rnn_num_hidden,512),
+                                   nn.ELU(),
+                                   nn.Linear(512,256),
+                                   nn.ELU(),
+                                   nn.Linear(256,128),
+                                   nn.ELU(),
+                                   nn.Linear(128,num_actions))
+        
+        self.rnn = Memory(num_prop+self.num_est, type=rnn_type, num_layers=rnn_num_layers, hidden_size=rnn_num_hidden)
+        
+        self.gate_net = nn.Sequential(
+            nn.Linear(2*rnn_num_hidden, rnn_num_hidden),
+            nn.Sigmoid()
+        )
+
+        # estimator
+        self.Vae = PureVqvaeEMA(in_dim=self.num_height,output_dim=self.num_height,num_emb=self.num_height_encode)
+        
+        self.est_rnn = Memory(num_prop, type=rnn_type, num_layers=rnn_num_layers, hidden_size=rnn_num_hidden)
+        
+        self.predict_vel_layer = nn.Sequential(
+                                   nn.ELU(),
+                                   nn.Linear(rnn_num_hidden,128),
+                                   nn.ELU(),
+                                   nn.Linear(128,64),
+                                   nn.ELU(),
+                                   nn.Linear(64,3))
+        
+        self.predict_terrian_layer = nn.Sequential(
+                                   nn.ELU(),
+                                   nn.Linear(wm_feature_dim,128),
+                                   nn.ELU(),
+                                   nn.Linear(128,64),
+                                   nn.ELU(),
+                                   nn.Linear(64,16))
+        
+        self.predict_onehot_layer = nn.Sequential(nn.ELU(),
+                                           nn.Linear(16,256),
+                                           nn.ELU(),
+                                           nn.Linear(256,self.num_height_encode))
+        
+        self.random = 1
+        
+    def set_random(self,random):
+        self.random = random
+        
+    def forward(self,observations, wm_features, masks=None, hidden_states=None):
+
+        if hidden_states:
+            with torch.no_grad():
+                est_encode = self.est_rnn(observations,masks,hidden_states[1],False)
+                predicted_vel = self.predict_vel_layer(est_encode)
+                # g = self.gate_net(torch.cat([est_encode, wm_features], dim=-1))
+                # terr_in = g * wm_features + (1.0 - g) * est_encode
+          
+                # terr_in = torch.cat([est_encode, wm_features_unpad], dim=-1)
+                
+                predicted_terrian = self.predict_terrian_layer(wm_features)
+            
+            
+            
+            actor_input = torch.cat([observations,predicted_vel.detach(),predicted_terrian.detach()],dim=-1)
+            encode = self.rnn(actor_input,masks,hidden_states[0]).squeeze(0)
+            mean  = self.actor(encode)
+        else:
+            with torch.no_grad():
+                est_encode = self.est_rnn(observations,masks,hidden_states)
+                predicted_vel = self.predict_vel_layer(est_encode).squeeze(0)
+                # g = self.gate_net(torch.cat([est_encode, wm_features.unsqueeze(0)], dim=-1))
+                # terr_in = g * wm_features + (1.0 - g) * est_encode
+                # terr_in = torch.cat([est_encode, wm_features], dim=-1)
+     
+                predicted_terrian = self.predict_terrian_layer(wm_features).squeeze(0)
+                
+            actor_input = torch.cat([observations,predicted_vel.detach(),predicted_terrian.detach()],dim=-1)
+            encode = self.rnn(actor_input,masks,hidden_states).squeeze(0)
+            mean  = self.actor(encode)
+    
+        return mean
+    
+    def depoly_forward(self, obs, wm_features, est_hidden, hidden):
+        
+        est_encode,est_next_hidden = self.est_rnn.depoly_inference(obs,est_hidden)
+        # g = self.gate_net(torch.cat([est_encode, wm_features], dim=-1))
+        # terr_in = g * wm_features + (1.0 - g) * est_encode
+        predicted_vel = self.predict_vel_layer(est_encode)
+        predicted_height = self.predict_terrian_layer(wm_features)
+        predicted_onehot_encode = self.predict_onehot_layer(predicted_height).reshape(-1,128).contiguous()
+        pred_class = torch.argmax(predicted_onehot_encode, dim=-1) 
+        print(f'地形类别：{pred_class[0]}')
+
+        actor_input = torch.cat([obs,predicted_vel,predicted_height],dim=-1)
+        encode, next_hidden= self.rnn.depoly_inference(actor_input,hidden)
+        
+        mean  = self.actor(encode.squeeze(0))
+        return mean, est_next_hidden, next_hidden
+    
+    def Loss(self,subtask_data,wm_features):
+        obs_batch, critic_obs_batch, next_critic_obs_batch, hid_e_batch, masks_batch = subtask_data
+        
+        # get terrian type and speed target
+        critic_obs_unpad_batch = unpad_trajectories(critic_obs_batch,masks_batch)
+        cur_vel_target = critic_obs_unpad_batch[...,self.num_height+3:self.num_height+6]
+        
+        # get hidden
+        hidden = self.est_rnn(obs_batch,masks_batch,hid_e_batch)
+        predicted_vel = self.predict_vel_layer(hidden).squeeze(0)
+
+
+        wm_features_unpad = unpad_trajectories(wm_features,masks_batch)
+        # g = self.gate_net(torch.cat([hidden, wm_features_unpad], dim=-1))
+        # terr_in = g * wm_features_unpad + (1.0 - g) * hidden
+        predicted_terrian_latent = self.predict_terrian_layer(wm_features_unpad).squeeze(0)
+        
+        # update VQVAE
+        height = critic_obs_unpad_batch[...,:self.num_height].reshape(-1,self.num_height).contiguous()
+        recon,quantize,z,onehot_encode = self.Vae(height)
+        rec_loss = self.Vae.loss_fn(height,recon,quantize,z,onehot_encode)
+        
+        # predict encode    
+        predicted_onehot_encode = self.predict_onehot_layer(predicted_terrian_latent).reshape(-1,128).contiguous()
+        target = torch.argmax(onehot_encode.clone().detach(),dim=-1)
+
+        cls_loss = F.cross_entropy(predicted_onehot_encode,target)  
+        mseloss = F.mse_loss(predicted_vel,cur_vel_target.detach())
+        loss = cls_loss + mseloss + rec_loss
+        return loss
+
+
+
+class RnnTerrianHeightActor(nn.Module):
+    def __init__(self,
+                 num_prop,
+                 actor_dims,
+                 num_actions,
+                 activation,
+                 rnn_num_hidden,
+                 rnn_type='gru',
+                 rnn_num_layers=1) -> None:
+        
+        super(RnnTerrianHeightActor,self).__init__()
+        
+        self.num_est = 3 + 16
+        self.num_height = 187 
+        self.num_prop = num_prop - self.num_height
+        self.num_height_encode = 128
+        self.num_priv = 5
+        self.rnn_type = rnn_type
+        self.rnn_num_layers = rnn_num_layers
+        self.rnn_num_hidden = rnn_num_hidden 
+        
+        self.actor = nn.Sequential(nn.ELU(),
+                                   nn.Linear(rnn_num_hidden,512),
+                                   nn.ELU(),
+                                   nn.Linear(512,256),
+                                   nn.ELU(),
+                                   nn.Linear(256,128),
+                                   nn.ELU(),
+                                   nn.Linear(128,num_actions))
+        
+        self.rnn = Memory(self.num_prop+self.num_est, type=rnn_type, num_layers=rnn_num_layers, hidden_size=rnn_num_hidden)
+        
+        # estimator
+        self.Vae = PureVqvaeEMA(in_dim=self.num_height,output_dim=self.num_height,num_emb=self.num_height_encode)
+        
+        self.est_rnn = Memory(self.num_prop, type=rnn_type, num_layers=rnn_num_layers, hidden_size=rnn_num_hidden)
+        
+        self.predict_vel_layer = nn.Sequential(
+                                   nn.ELU(),
+                                   nn.Linear(rnn_num_hidden,128),
+                                   nn.ELU(),
+                                   nn.Linear(128,64),
+                                   nn.ELU(),
+                                   nn.Linear(64,3))
+        
+        self.predict_terrian_layer = nn.Sequential(
+                                   nn.ELU(),
+                                   nn.Linear(rnn_num_hidden,128),
+                                   nn.ELU(),
+                                   nn.Linear(128,64),
+                                   nn.ELU(),
+                                   nn.Linear(64,16))
+        
+        self.predict_onehot_layer = nn.Sequential(nn.ELU(),
+                                           nn.Linear(16,256),
+                                           nn.ELU(),
+                                           nn.Linear(256,self.num_height_encode))
+        
+        self.random = 1
+        
+    def set_random(self,random):
+        self.random = random
+        
+    def forward(self,observations, masks=None, hidden_states=None):
+        
+        if hidden_states:
+            with torch.no_grad():
+                prop = observations[:,:,self.num_height:]
+                size = prop.shape
+                est_encode = self.est_rnn(prop,masks,hidden_states[1],False)
+                predicted_vel = self.predict_vel_layer(est_encode)
+                # predicted_terrian = self.predict_terrian_layer(est_encode)
+
+                height = observations[...,:self.num_height].reshape(-1,self.num_height).contiguous()
+                recon,quantize,z,onehot_encode = self.Vae(height)
+                z = z.reshape(size[0],size[1],-1)
+            
+            
+            
+            actor_input = torch.cat([prop,predicted_vel.detach(),z.detach()],dim=-1)
+            encode = self.rnn(actor_input,masks,hidden_states[0]).squeeze(0)
+            mean  = self.actor(encode)
+        else:
+            with torch.no_grad():
+                prop = observations[:,self.num_height:]
+                est_encode = self.est_rnn(prop,masks,hidden_states)
+                predicted_vel = self.predict_vel_layer(est_encode).squeeze(0)
+                # predicted_terrian = self.predict_terrian_layer(est_encode).squeeze(0)
+                height = observations[...,:self.num_height].reshape(-1,self.num_height).contiguous()
+                recon,quantize,z,onehot_encode = self.Vae(height)
+                
+            actor_input = torch.cat([prop,predicted_vel.detach(),z.detach()],dim=-1)
+            encode = self.rnn(actor_input,masks,hidden_states).squeeze(0)
+            mean  = self.actor(encode)
+    
+        return mean
+    
+    def depoly_forward(self, obs, est_hidden, hidden):
+        prop = obs[:,:,self.num_height:]
+        size = prop.shape
+        est_encode,est_next_hidden = self.est_rnn.depoly_inference(prop,est_hidden)
+        predicted_vel = self.predict_vel_layer(est_encode)
+        # predicted_height = self.predict_terrian_layer(est_encode)
+        # predicted_onehot_encode = self.predict_onehot_layer(predicted_height).reshape(-1,128).contiguous()
+        # pred_class = torch.argmax(predicted_onehot_encode, dim=-1) 
+        # print(f'地形类别：{pred_class[0]}')
+        prop = obs[:,:,self.num_height:]
+        height = obs[...,:self.num_height].reshape(-1,self.num_height).contiguous()
+        recon,quantize,z,onehot_encode = self.Vae(height)
+        z = z.reshape(size[0],size[1],-1)
+        actor_input = torch.cat([prop,predicted_vel,z],dim=-1)
+        encode, next_hidden= self.rnn.depoly_inference(actor_input,hidden)
+        
+        mean  = self.actor(encode.squeeze(0))
+        return mean, est_next_hidden, next_hidden
+    
+    def Loss(self,subtask_data):
+        obs_batch, critic_obs_batch, next_critic_obs_batch, hid_e_batch, masks_batch = subtask_data
+        
+        # get terrian type and speed target
+        critic_obs_unpad_batch = unpad_trajectories(critic_obs_batch,masks_batch)
+        cur_vel_target = critic_obs_unpad_batch[...,self.num_height+3:self.num_height+6]
+        
+        prop_batch = obs_batch[:,:,self.num_height:]
+        # get hidden
+        hidden = self.est_rnn(prop_batch,masks_batch,hid_e_batch)
+        predicted_vel = self.predict_vel_layer(hidden).squeeze(0)
+        predicted_terrian_latent = self.predict_terrian_layer(hidden).squeeze(0)
+        
+        # update VQVAE
+        height = critic_obs_unpad_batch[...,:self.num_height].reshape(-1,self.num_height).contiguous()
+        recon,quantize,z,onehot_encode = self.Vae(height)
+        rec_loss = self.Vae.loss_fn(height,recon,quantize,z,onehot_encode)
+        
+        # predict encode    
+        predicted_onehot_encode = self.predict_onehot_layer(predicted_terrian_latent).reshape(-1,128).contiguous()
+        target = torch.argmax(onehot_encode.clone().detach(),dim=-1)
+
+        cls_loss = F.cross_entropy(predicted_onehot_encode,target)  
+        mseloss = F.mse_loss(predicted_vel,cur_vel_target.detach())
+        loss = cls_loss + mseloss + rec_loss
+        return loss
+    
+
+
+
+
+
+
+class DepthPredictor(nn.Module):
+    def __init__(self, forward_heightamp_dim = 525,
+                 prop_dim = 72,
+                 depth_image_dims = [64, 64],
+                 encoder_hidden_dims=[256, 128],
+                 depth=32,
+                 act="ELU",
+                 norm=True,
+                 kernel_size=4,
+                 minres=4,
+                 outscale=1.0,
+                 cnn_sigmoid=False,):
+
+
+        # add this to fully recover the process of conv encoder
+        h, w = depth_image_dims
+        stages = int(np.log2(w) - np.log2(minres))
+        self.h_list = []
+        self.w_list = []
+        for i in range(stages):
+            h, w = (h+1) // 2, (w+1) // 2
+            self.h_list.append(h)
+            self.w_list.append(w)
+        self.h_list = self.h_list[::-1]
+        self.w_list = self.w_list[::-1]
+        self.h_list.append(depth_image_dims[0])
+        self.w_list.append(depth_image_dims[1])
+
+        super(DepthPredictor, self).__init__()
+        act = getattr(torch.nn, act)
+        self._cnn_sigmoid = cnn_sigmoid
+        layer_num = len(self.h_list) - 1
+        # layer_num = int(np.log2(shape[2]) - np.log2(minres))
+        # self._minres = minres
+        # out_ch = minres**2 * depth * 2 ** (layer_num - 1)
+        out_ch = self.h_list[0] * self.w_list[0] * depth * 2 ** (len(self.h_list) - 2)
+        self._embed_size = out_ch
+
+        in_dim = out_ch // (self.h_list[0] * self.w_list[0])
+        out_dim = in_dim // 2
+
+        # Encoder
+        encoder_layers = []
+        encoder_layers.append(nn.Linear(forward_heightamp_dim + prop_dim, encoder_hidden_dims[0]))
+        encoder_layers.append(act())
+        for l in range(len(encoder_hidden_dims)):
+            if l == len(encoder_hidden_dims) - 1:
+                encoder_layers.append(nn.Linear(encoder_hidden_dims[l], self._embed_size))
+            else:
+                encoder_layers.append(nn.Linear(encoder_hidden_dims[l], encoder_hidden_dims[l + 1]))
+                encoder_layers.append(act())
+        self.encoder = nn.Sequential(*encoder_layers)
+
+
+        layers = []
+        # h, w = minres, minres
+        for i in range(layer_num):
+            bias = False
+            if i == layer_num - 1:
+                out_dim = 1
+                act = False
+                bias = True
+                norm = False
+
+            if i != 0:
+                in_dim = 2 ** (layer_num - (i - 1) - 2) * depth
+            if(self.h_list[i] * 2 == self.h_list[i+1]):
+                pad_h, outpad_h = 1, 0
+            else:
+                pad_h, outpad_h = 2, 1
+
+            if(self.w_list[i] * 2 == self.w_list[i+1]):
+                pad_w, outpad_w = 1, 0
+            else:
+                pad_w, outpad_w = 2, 1
+
+            layers.append(
+                nn.ConvTranspose2d(
+                    in_dim,
+                    out_dim,
+                    kernel_size,
+                    2,
+                    padding=(pad_h, pad_w),
+                    output_padding=(outpad_h, outpad_w),
+                    bias=bias,
+                )
+            )
+            if norm:
+                layers.append(ImgChLayerNorm(out_dim))
+            if act:
+                layers.append(act())
+            in_dim = out_dim
+            out_dim //= 2
+            # h, w = h * 2, w * 2
+        [m.apply(tools.weight_init) for m in layers[:-1]]
+        layers[-1].apply(tools.uniform_weight_init(outscale))
+        self.layers = nn.Sequential(*layers)
+
+
+    def forward(self, forward_heightmap, prop):
+        x = torch.concat((forward_heightmap, prop), dim=-1)
+        x = self.encoder(x)
+        # (batch, time, -1) -> (batch * time, h, w, ch)
+        x = x.reshape(
+            [-1, self.h_list[0], self.w_list[0], self._embed_size // (self.h_list[0] * self.w_list[0])]
+        )
+        # (batch, time, -1) -> (batch * time, ch, h, w)
+        x = x.permute(0, 3, 1, 2)
+        # print('init decoder shape:', x.shape)
+        # for layer in self.layers:
+        #     x = layer(x)
+        #     print(x.shape)
+        x = self.layers(x)
+        mean = x.permute(0, 2, 3, 1)
+        if self._cnn_sigmoid:
+            mean = F.sigmoid(mean)
+        # else:
+        #     mean += 0.5
+        return mean
+
+
+class ImgChLayerNorm(nn.Module):
+    def __init__(self, ch, eps=1e-03):
+        super(ImgChLayerNorm, self).__init__()
+        self.norm = torch.nn.LayerNorm(ch, eps=eps)
+
+    def forward(self, x):
+        x = x.permute(0, 2, 3, 1)
+        x = self.norm(x)
+        x = x.permute(0, 3, 1, 2)
+        return x
