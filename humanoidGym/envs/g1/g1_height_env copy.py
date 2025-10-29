@@ -12,12 +12,12 @@ import random
 import math
 import time
 from collections import deque
-from humanoidGym.utils.math import wrap_to_pi
 
 from humanoidGym.algo.ppo.utils import build_mirror_ls
 from humanoidGym.envs.base.legged_robot_config import LeggedRobotCfg
 from humanoidGym.utils import exponential_progress, quat_apply_yaw
 from humanoidGym.utils.terrain_parkour import TerrainParkour
+from humanoidGym.utils.math import wrap_to_pi
 
 from humanoidGym.utils.isaacgym_utils import get_euler_xyz as get_euler_xyz_in_tensor
 import cv2
@@ -71,7 +71,7 @@ class AmpG1HeightRobot(LeggedRobot):
                                                               interpolation=torchvision.transforms.InterpolationMode.BICUBIC)
         
           # for debug
-        self.debug_viz = False
+        self.debug_viz = True
         self.lookat_id = 0
 
         self.global_counter = 0
@@ -216,7 +216,7 @@ class AmpG1HeightRobot(LeggedRobot):
             # create env instance
             env_handle = self.gym.create_env(self.sim, env_lower, env_upper, int(np.sqrt(self.num_envs)))
             pos = self.env_origins[i].clone()
-            pos[:2] += torch_rand_float(-0.5, 0.5, (2,1), device=self.device).squeeze(1)
+            # pos[:2] += torch_rand_float(-1., 1., (2,1), device=self.device).squeeze(1)
             # move up for uneven
             pos[2] += self.base_init_state[2]
             start_pose.p = gymapi.Vec3(*pos)
@@ -654,7 +654,6 @@ class AmpG1HeightRobot(LeggedRobot):
         self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
         self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
 
-        self._resample_commands(torch.arange(self.num_envs))
         self.compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
 
 
@@ -679,12 +678,11 @@ class AmpG1HeightRobot(LeggedRobot):
         """
         self.reset_buf = torch.any(torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1) > 1., dim=1)
         vel_error = self.base_lin_vel[:, 0] - self.commands[:, 0]
-        self.vel_violate = ((vel_error > 1.0) & (self.commands[:, 0] < 0.)) | ((vel_error < -1.0) & (self.commands[:, 0] > 0.))
-        self.vel_violate *= (self.terrain_levels > 2)
+        self.vel_violate = ((vel_error > 1.5) & (self.commands[:, 0] < 0.)) | ((vel_error < -1.5) & (self.commands[:, 0] > 0.))
+        self.vel_violate *= (self.terrain_levels > 3)
         
-        self.fail_buf = torch.logical_or(torch.abs(self.rpy[:,1])>0.8, torch.abs(self.rpy[:,0])>0.8)
+        self.reset_buf |= torch.logical_or(torch.abs(self.rpy[:,1])>0.8, torch.abs(self.rpy[:,0])>0.8)
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
-        self.reset_buf |= self.fail_buf
         self.reset_buf |= self.time_out_buf
         self.reset_buf |= self.vel_violate
     
@@ -727,35 +725,26 @@ class AmpG1HeightRobot(LeggedRobot):
         root_orn = AMPLoader.get_root_rot_batch(frames)
         self.root_states[env_ids, 3:7] = root_orn
 
-        
+        # the base y position of tilt and gap envs can not deviate too far from the origin center
+        tilt_env_ids = env_ids[torch.where(env_ids >= self.tilt_start_idx)]
+        tilt_env_ids = tilt_env_ids[torch.where(tilt_env_ids < self.tilt_end_idx)]
+        gap_env_ids = env_ids[torch.where(env_ids >= self.gap_start_idx)]
+        gap_env_ids = gap_env_ids[torch.where(gap_env_ids < self.gap_end_idx)]
+        tilt_and_gap_env_ids = torch.concatenate((tilt_env_ids, gap_env_ids))
+
+        if self.custom_origins:
+            self.root_states[tilt_and_gap_env_ids] = self.base_init_state
+            self.root_states[tilt_and_gap_env_ids, :3] += self.env_origins[tilt_and_gap_env_ids]
+            self.root_states[tilt_and_gap_env_ids, :1] += torch_rand_float(-1., 1., (len(tilt_and_gap_env_ids), 1), device=self.device) # x position within 1m of the center
+            self.root_states[tilt_and_gap_env_ids, 1:2] += torch_rand_float(-0.0, 0.0, (len(tilt_and_gap_env_ids), 1),
+                                                               device=self.device)
+        else:
+            self.root_states[tilt_and_gap_env_ids] = self.base_init_state
+            self.root_states[tilt_and_gap_env_ids, :3] += self.env_origins[tilt_and_gap_env_ids]
+
         self.root_states[env_ids, 7:10] = quat_rotate(root_orn, AMPLoader.get_linear_vel_batch(frames))
         self.root_states[env_ids, 10:13] = quat_rotate(root_orn, AMPLoader.get_angular_vel_batch(frames))
 
-        env_ids_int32 = env_ids.to(dtype=torch.int32)
-        self.gym.set_actor_root_state_tensor_indexed(self.sim,
-                                                     gymtorch.unwrap_tensor(self.root_states),
-                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
-
-
-    def _reset_root_states(self, env_ids):
-        """ Resets ROOT states position and velocities of selected environmments
-            Sets base position based on the curriculum
-            Selects randomized base velocities within -0.5:0.5 [m/s, rad/s]
-        Args:
-            env_ids (List[int]): Environemnt ids
-        """
-        # base position
-        if self.custom_origins:
-            self.root_states[env_ids] = self.base_init_state
-            self.root_states[env_ids, :3] += self.env_origins[env_ids]
-            self.root_states[env_ids, :2] += torch_rand_float(-0.5, 0.5, (len(env_ids), 1), device=self.device) # xy position within 1m of the center
-        else:
-            self.root_states[env_ids] = self.base_init_state
-            self.root_states[env_ids, :3] += self.env_origins[env_ids]
-        
-
-        # base velocities
-        self.root_states[env_ids, 7:13] = torch_rand_float(-0.5, 0.5, (len(env_ids), 6), device=self.device) # [7:10]: lin vel, [10:13]: ang vel
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                      gymtorch.unwrap_tensor(self.root_states),
@@ -786,8 +775,7 @@ class AmpG1HeightRobot(LeggedRobot):
         if self.cfg.env.reference_state_initialization:
             frames = self.amp_loader.get_full_frame_batch(len(env_ids))
             self._reset_dofs_amp(env_ids, frames)
-            self._reset_root_states(env_ids)
-            # self._reset_root_states_amp(env_ids, frames)
+            self._reset_root_states_amp(env_ids, frames)
             # self._resample_commands_amp(env_ids, frames)
         else:
             self._reset_dofs(env_ids)
@@ -841,7 +829,7 @@ class AmpG1HeightRobot(LeggedRobot):
             heading = torch.atan2(forward[:, 1], forward[:, 0])
             self.commands[:, 2] = torch.clip(0.5*wrap_to_pi(self.commands[:, 3] - heading), -1., 1.)
 
-        if self.cfg.terrain.measure_heights and self.global_counter % self.cfg.depth.update_interval == 0:
+        if self.cfg.terrain.measure_heights and self.global_counter % self.cfg.depth.update_interval :
             self.measured_heights = self._get_heights()
             
         # if self.cfg.domain_rand.push_robots:
@@ -1017,8 +1005,7 @@ class AmpG1HeightRobot(LeggedRobot):
             self.extras["observations"] = {}
             self.extras["observations"]["critic"] = self.privileged_obs_buf
             self.extras["observations"]["rnd_state"] = self.privileged_obs_buf
-            if self.cfg.depth.use_camera:
-                self.extras["depth"] = self.depth_buffer[:, -2] 
+            # self.extras["depth"] = self.depth_buffer[:, -2] 
             
         return self.obs_buf, self.extras
     
@@ -1355,7 +1342,9 @@ class AmpG1HeightRobot(LeggedRobot):
         return torch.sum((torch.abs(self.torques) - self.torque_limits*self.cfg.rewards.soft_torque_limit).clip(min=0.), dim=1)
     
     def _reward_yaw_error_when_rate_matches(self):
-        
+        # 参数（可调）
+        k_yaw = 1.0        # 偏航角误差权重（平方惩罚）
+        k_rate = 1.5       # 偏航速率误差权重（平方惩罚）
 
 
         # 计算速率匹配条件（绝对误差）
@@ -1370,16 +1359,14 @@ class AmpG1HeightRobot(LeggedRobot):
         yaw_err = torch.atan2(torch.sin(yaw_diff), torch.cos(yaw_diff))
 
         # 基础惩罚：二次惩罚（更平滑、可微）
-        yaw_pen = (torch.abs(rate_err) > 0.5) * (yaw_err ** 2)
-        rate_pen = (torch.abs(yaw_err)  > 0.5)  * (rate_err ** 2)
-        # print(f"yaw_err:{yaw_err}")
-        # print(f"rate_err:{rate_err}")
+        yaw_pen = k_yaw * (yaw_err ** 2)
+        rate_pen = k_rate * (rate_err ** 2)
 
         # 当速率接近时，放大 yaw 惩罚（鼓励同时满足角度与速率）
         penalty = rate_pen+yaw_pen
 
 
-        return penalty*(self.terrain_levels > 1)
+        return penalty
 
 
     def _reward_cheat(self):
@@ -1404,12 +1391,3 @@ class AmpG1HeightRobot(LeggedRobot):
         edge_reward = torch.zeros_like(rew)
         edge_reward[self.gap_start_idx:self.pit_end_idx] = rew[self.gap_start_idx:self.pit_end_idx]
         return edge_reward
-    
-
-    def _reward_lin_error_when_command(self):
-   
-        # 惩罚有速度但是机器人不敢动的现象
-        rate_err = self.base_lin_vel[:, 0] - self.commands[:, 0]
-        penalty = (torch.abs(self.commands[:,0]) > 0.2) * (rate_err ** 2)*(self.terrain_levels > 1)
-   
-        return penalty

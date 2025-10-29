@@ -160,6 +160,8 @@ class AmpOnPolicyRunner:
         tot_iter = start_iter + num_learning_iterations
         
         for it in range(start_iter, tot_iter):
+            if (self.env.cfg.rewards.reward_curriculum):
+                self.env.update_reward_curriculum(it)
             start = time.time()
             # Rollout
             with torch.inference_mode():

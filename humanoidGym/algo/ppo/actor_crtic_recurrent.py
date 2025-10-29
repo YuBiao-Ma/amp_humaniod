@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.distributions import Normal
 from torch.nn.modules import rnn
 
-from humanoidGym.algo.ppo.modules import Memory, RnnActor, RnnBaselineActor, RnnTerrianHeightActor,RnnTerrianImageActor,RnnEstVelActor, RnnEstVelHeightActor, RnnEstVelHeightContactSiamActor, RnnEstVelHeightContactSiamNormActor, RnnEstVelHeightMorePrivSiamNormActor, RnnEstVelHeightPrivSiamActor, RnnEstVelHeightPrivSiamNormActor, RnnEstVelHeightSiamActor, RnnEstVelHeightSiamNormActor, RnnNextLatentActor, RnnNextSiamNormActor, RnnSimpleEstVelActor, RnnTerrianLatentActor, mlp_factory
+from humanoidGym.algo.ppo.modules import Memory, RnnActor, RnnBaselineActor, RnnTerrianHeightActor_V1,RnnTerrianHeight_V2Actor,RnnTerrianHeightActor,RnnTerrianImageActor,RnnEstVelActor, RnnEstVelHeightActor, RnnEstVelHeightContactSiamActor, RnnEstVelHeightContactSiamNormActor, RnnEstVelHeightMorePrivSiamNormActor, RnnEstVelHeightPrivSiamActor, RnnEstVelHeightPrivSiamNormActor, RnnEstVelHeightSiamActor, RnnEstVelHeightSiamNormActor, RnnNextLatentActor, RnnNextSiamNormActor, RnnSimpleEstVelActor, RnnTerrianLatentActor, mlp_factory
 from humanoidGym.algo.ppo.utils import unpad_trajectories
 from .actor_critic import ActorCritic, get_activation
 import torch.optim as optim
@@ -230,7 +230,7 @@ class ActorCriticRecurrent(nn.Module):
         self.num_actions = num_actions
         self.num_critic_obs = num_critic_obs
         
-        self.actor = RnnTerrianHeightActor(num_prop=num_prop,
+        self.actor = RnnTerrianHeight_V2Actor(num_prop=num_prop,
                                       actor_dims=[512,256,128],
                                       num_actions=num_actions,
                                       activation=activation,

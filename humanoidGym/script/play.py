@@ -17,13 +17,13 @@ torch.autograd.set_detect_anomaly(True)
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
-    num_play_envs = 10
+    num_play_envs = 20
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, num_play_envs)
-    env_cfg.terrain.num_rows = 5
-    env_cfg.terrain.num_cols = 1
+    # env_cfg.terrain.num_rows = 5
+    # env_cfg.terrain.num_cols = 1
     #env_cfg.terrain.mesh_type = 'plane'
-    env_cfg.terrain.curriculum = False
-    env_cfg.terrain.selected = False
+    env_cfg.terrain.curriculum = True
+    env_cfg.terrain.selected = True
     env_cfg.noise.add_noise = False
     env_cfg.domain_rand.randomize_friction = False
     env_cfg.domain_rand.push_robots = False
@@ -39,21 +39,22 @@ def play(args):
     env_cfg.domain_rand.randomize_inertia = False
 
     env_cfg.env.test = False
-    env_cfg.commands.ranges.lin_vel_x = [0.5,1]
+    env_cfg.commands.ranges.lin_vel_x = [0.6,0.6]
     env_cfg.commands.ranges.lin_vel_y = [0,0]
     env_cfg.commands.ranges.heading = [0,0]
     env_cfg.commands.ranges.ang_vel_yaw = [0,0]
     env_cfg.env.episode_length_s = 200
     
-    # env_cfg.terrain.stair_height_range = [2.1, 2.1]
-    env_cfg.terrain.terrain_proportions = {
-        'slope': [0, 1.0, 0.0, 0, 0, 0, 0, 0, 0],
-        'stair': [0, 0, 1.0, 0, 0, 0, 0, 0, 0],
-        'gap': [0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0],
-        'climb': [0, 0, 0, 0, 0, 0, 1.0, 0, 0, 0],
-        'tilt': [0, 0, 0, 0, 0, 0, 0, 1.0, 0, 0],
-        'crawl': [0, 0, 0, 0, 0, 0, 0, 0, 1.0, 0],
-     }["climb"]
+    env_cfg.height_noise.hsn_curriculum = False
+    env_cfg.height_noise.hsn_scenario_probs = [1.0, 0.0, 0.0]
+    # env_cfg.terrain.terrain_proportions = {
+    #     'slope': [0, 1.0, 0.0, 0, 0, 0, 0, 0, 0],
+    #     'stair': [0, 0, 0, 1, 0, 0, 0, 0, 0],
+    #     'gap': [0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0],
+    #     'climb': [0, 0, 0, 0, 0, 0, 1.0, 0, 0, 0],
+    #     'tilt': [0, 0, 0, 0, 0, 0, 0, 1.0, 0, 0],
+    #     'crawl': [0, 0, 0, 0, 0, 0, 0, 0, 1.0, 0],
+    #  }["climb"]
 
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)

@@ -152,7 +152,7 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
         num_rows = 10  # number of terrain rows (levels)
         num_cols = 20  # number of terrain cols (types)
         # terrain types: [wave, rough slope, stairs up, stairs down, discrete, gap, pit, tilt, crawl, rough_flat]
-        terrain_proportions = [0.0, 0.05, 0.15, 0.15, 0.0, 0.15, 0.25, 0.05, 0.25, 0.00]
+        terrain_proportions = [0.0, 0.15, 0.0, 0.25, 0.0, 0.15, 0.25, 0.05, 0.25, 0.00]
         # terrain_proportions = [0, 1.0, 0.0, 0, 0, 0, 0, 0, 0]
         # trimesh only:
         slope_treshold = 0.75  # slopes above this threshold will be corrected to vertical surfaces
@@ -168,7 +168,7 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
         z_angle = [0, 0]
         x_angle = [0, 0]
 
-        update_interval = 1  # 5 works without retraining, 8 worse
+        update_interval = 5 # 5 works without retraining, 8 worse
 
         original = (64, 64)
         resized = (64, 64)
@@ -182,7 +182,17 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
         scale = 1
         invert = True
 
-      
+    class height_noise:
+        height_scan_noise_enable = True
+        hsn_curriculum = True
+        hsn_csk_total_steps = 5e4
+        hsn_scenario_probs = [0.6, 0.3, 0.1]
+        # hsn_scenario_probs = [0.0, 0.0, 1]
+        # p_xy p_h e_xy e_h out_p out_m
+        hsn_z_nominal    = [0.004, 0.005, 0.01, 0.04, 0.03, 0.05]
+        hsn_z_offset =  [0.004, 0.005, 0.01, 0.10, 0.10, 0.02]
+        hsn_z_noisy =  [0.004, 0.1, 0.10, 0.30, 0.30, 0.30]
+
 
     class control( LeggedRobotCfg.control ):
         # PD Drive parameters:
@@ -260,7 +270,7 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
     
     class commands:
         curriculum = True
-        max_curriculum = 2.5
+        max_curriculum = 2.0
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         resampling_time = 10. # time before command are changed[s]
         heading_command = True # if true: compute         
@@ -278,7 +288,7 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
         max_contact_force = 500
         reward_curriculum = True
         reward_curriculum_term = ["feet_edge"]
-        reward_curriculum_schedule = [[4000, 10000, 0.1, 1.0]]
+        reward_curriculum_schedule = [[1000, 4000, 0.1, 1.0]]
         # only_positive_rewards = False
         class scales( LeggedRobotCfg.rewards.scales ):
             tracking_lin_vel = 3.0
@@ -301,7 +311,7 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
             ankle_roll_energy = 0.1
             # ankle_action_pitch = -0.05
             # ankle_action_roll = -0.1    
-            yaw_error_when_rate_matches = -0.1
+            yaw_error_when_rate_matches = -0.3
             # lin_error_when_command = -10
             stumble = -5.0
             # termination = -10
@@ -310,7 +320,7 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
             dof_pos_limits = -10.
             dof_torque_limits = -1
 
-            feet_edge = -0.5
+            feet_edge = -3
             cheat = -0.5
      
                 

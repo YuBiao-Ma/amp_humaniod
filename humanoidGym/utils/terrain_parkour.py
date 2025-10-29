@@ -99,6 +99,70 @@ class TerrainParkour:
             terrain = self.make_terrain(choice, difficulty)
             self.add_terrain_to_map(terrain, i, j)
 
+
+    def selected_terrain(self):
+        
+        for k in range(self.cfg.num_sub_terrains):
+            # Env coordinates in the world
+            (i, j) = np.unravel_index(k, (self.cfg.num_rows, self.cfg.num_cols))
+
+            terrain = terrain_utils.SubTerrain("terrain",
+                              width=self.width_per_env_pixels,
+                              length=self.width_per_env_pixels,
+                              vertical_scale=self.cfg.vertical_scale,
+                              horizontal_scale=self.cfg.horizontal_scale)
+            
+            
+          
+            
+            terrain_utils.random_uniform_terrain(terrain, min_height=-0.05, max_height=0.05, step=0.005,
+                                                 downsampled_scale=0.2)
+            if i == 0:
+                climb_terrain(terrain, depth=0.5, platform_size=4.)
+            if i == 2:
+                pyramid_stairs_terrain(terrain, step_width=0.33, step_height=0.15, platform_size=3.)
+            
+            if i == 1:
+                gap_terrain(terrain, gap_size=0.5, platform_size=4.)
+                
+            # if i == 3:
+            #     balance_beam_terrain(
+            #     terrain, 0.5,
+            #     corridor_w=2, margin=0.0,
+            #     beam_w_easy=0.7,   # 难度=0 时的木宽(米)
+            #     beam_w_hard=0.25,   # 难度=1 时的木宽(米)  ≥ 足底宽的 ~1.2×
+            #     pit_h_easy=10,    # 坑深(米)
+            #     pit_h_hard=10,
+            #     notch_w=0.0,       # 中央缺口的宽度(米)
+            # )
+            if i ==4:
+                terrain_utils.pyramid_sloped_terrain(terrain, slope=0.5, platform_size=3.)
+                # terrain_utils.pyramid_stairs_terrain(terrain, step_width=0.35, step_height=0.18, platform_size=3.)
+            # if i == 0:
+            #     terrain_utils.pyramid_stairs_terrain(terrain, step_width=0.35, step_height=0.15, platform_size=3.)
+           
+            self.add_terrain_to_map_myb(terrain, i, j)
+    
+    def add_terrain_to_map_myb(self, terrain, row, col):
+        i = row
+        j = col
+        # map coordinate system
+        start_x = self.border + i * self.length_per_env_pixels
+        end_x = self.border + (i + 1) * self.length_per_env_pixels
+        start_y = self.border + j * self.width_per_env_pixels
+        end_y = self.border + (j + 1) * self.width_per_env_pixels
+        self.height_field_raw[start_x: end_x, start_y:end_y] = terrain.height_field_raw
+
+        env_origin_x = 0 - (0.2) * self.env_width
+        env_origin_y = (0.5) * self.env_width
+        x1 = int((self.env_length/2. - 1) / terrain.horizontal_scale)
+        x2 = int((self.env_length/2. + 1) / terrain.horizontal_scale)
+        y1 = int((self.env_width/2. - 1) / terrain.horizontal_scale)
+        y2 = int((self.env_width/2. + 1) / terrain.horizontal_scale)
+        env_origin_z = np.max(terrain.height_field_raw[x1:x2, y1:y2])*terrain.vertical_scale
+        self.env_origins[i, j] = [env_origin_x, env_origin_y, 0]
+
+
     def evaluated_terrain(self):
         for j in range(self.cfg.num_cols):
             for i in range(self.cfg.num_rows):
@@ -117,20 +181,20 @@ class TerrainParkour:
                 terrain = self.make_terrain(choice, difficulty, i, j)
                 self.add_terrain_to_map(terrain, i, j)
 
-    def selected_terrain(self):
-        terrain_type = self.cfg.terrain_kwargs.pop('type')
-        for k in range(self.cfg.num_sub_terrains):
-            # Env coordinates in the world
-            (i, j) = np.unravel_index(k, (self.cfg.num_rows, self.cfg.num_cols))
+    # def selected_terrain(self):
+    #     terrain_type = self.cfg.terrain_kwargs.pop('type')
+    #     for k in range(self.cfg.num_sub_terrains):
+    #         # Env coordinates in the world
+    #         (i, j) = np.unravel_index(k, (self.cfg.num_rows, self.cfg.num_cols))
 
-            terrain = terrain_utils.SubTerrain("terrain",
-                                               width=self.width_per_env_pixels,
-                                               length=self.width_per_env_pixels,
-                                               vertical_scale=self.vertical_scale,
-                                               horizontal_scale=self.horizontal_scale)
+    #         terrain = terrain_utils.SubTerrain("terrain",
+    #                                            width=self.width_per_env_pixels,
+    #                                            length=self.width_per_env_pixels,
+    #                                            vertical_scale=self.vertical_scale,
+    #                                            horizontal_scale=self.horizontal_scale)
 
-            eval(terrain_type)(terrain, **self.cfg.terrain_kwargs.terrain_kwargs)
-            self.add_terrain_to_map(terrain, i, j)
+    #         eval(terrain_type)(terrain, **self.cfg.terrain_kwargs.terrain_kwargs)
+    #         self.add_terrain_to_map(terrain, i, j)
 
     def make_terrain(self, choice, difficulty, i = 0, j = 0):
         terrain = terrain_utils.SubTerrain("terrain",
@@ -139,7 +203,7 @@ class TerrainParkour:
                                            vertical_scale=self.cfg.vertical_scale,
                                            horizontal_scale=self.cfg.horizontal_scale)
         amplitude = 0.1 + 0.2 * difficulty
-        slope = difficulty * 0.4
+        slope = difficulty * 0.8 + 0.1
         step_height = 0.05 + 0.3 * difficulty
         discrete_obstacles_height = 0.05 + difficulty * 0.5
         stepping_stones_size = 1.5 * (1.05 - difficulty)
@@ -161,8 +225,8 @@ class TerrainParkour:
         elif choice < self.proportions[3]:
             if choice < self.proportions[2]:
                 step_height *= -1
-            terrain_utils.pyramid_stairs_terrain(terrain, step_width=stair_step_width, step_height=step_height,
-                                                 platform_size=3.)
+            pyramid_stairs_terrain(terrain, step_width=stair_step_width, step_height=step_height,
+                                                 platform_size=1.)
             # terrain_utils.random_uniform_terrain(terrain, min_height=-0.05, max_height=0.05, step=0.005,
             #                                      downsampled_scale=0.2)
         elif choice < self.proportions[4]:
@@ -283,6 +347,116 @@ def balance_beam_terrain(terrain, difficulty,
         hf[xL:xR, yL:yR] = pit_val
 
 
+def pyramid_stairs_terrain(terrain, step_width, step_height, platform_size=1.0):
+    """
+    生成“上楼梯 → 中心平台 → 下楼梯”的走廊地形，并把左右两侧设为深坑防绕路。
+
+    几何结构 (沿 x 前进方向):
+        [上楼梯(逐级升高)] [平台(恒高)] [下楼梯(逐级降低)]
+
+    参数 (米):
+        step_width (float):    每一级台阶在 x 方向的长度
+        step_height (float):   每一级台阶相对前一级增加/减少的高度
+        platform_size (float): 中间平台在 x 方向的长度
+    """
+
+    # -------- 连续量(米) -> height_field_raw 索引单位 --------
+    step_width_idx    = int(step_width    / terrain.horizontal_scale)
+    step_height_idx   = int(step_height   / terrain.vertical_scale)
+    platform_len_idx  = int(platform_size / terrain.horizontal_scale)
+
+    # 防止出现 0 导致死循环
+    step_width_idx   = max(step_width_idx,   1)
+    step_height_idx  = max(step_height_idx,  1)
+    platform_len_idx = max(platform_len_idx, 1)
+
+    # -------- 定义中间走廊，左右两边挖深坑以防绕路 --------
+    center_y = terrain.width // 2
+
+    # 走廊半宽（米）：和 climb_terrain 保持同一风格，稍微随机，避免策略死记
+    width_rand = 1.0 + 1.0 * np.random.random()
+    half_corridor = 2.0 * width_rand  # 走廊半宽(米)
+
+    y1 = int(center_y - half_corridor / terrain.horizontal_scale)
+    y2 = int(center_y + half_corridor / terrain.horizontal_scale)
+
+    # 边界裁剪
+    y1 = max(y1, 0)
+    y2 = min(y2, terrain.height_field_raw.shape[1])
+
+    # 把走廊外的区域变成深坑（禁止绕行）
+    terrain.height_field_raw[:, :y1] = -1000
+    terrain.height_field_raw[:, y2:] = -1000
+
+    # -------- 生成楼梯剖面 (沿 x 方向对称：上→平台→下) --------
+    total_len_x = terrain.length  # x 方向一共有多少格
+    # 平台长度不能超过整段，否则后面就没“下楼梯”空间了
+    platform_len_idx = min(platform_len_idx, total_len_x)
+
+    # 我们把整段 x 分成三段：
+    # [0            : left_len )   -> 上楼梯 (高度递增)
+    # [left_len     : plat_end )   -> 平台 (恒定最高高度)
+    # [plat_end     : total_len_x) -> 下楼梯 (高度递减)
+
+    # 先把平台放在整个走廊的“中间”
+    left_len = (total_len_x - platform_len_idx) // 2
+    right_len = total_len_x - platform_len_idx - left_len
+    x_left_start = 0
+    x_left_end   = left_len
+    x_plat_start = x_left_end
+    x_plat_end   = x_plat_start + platform_len_idx
+    x_right_start = x_plat_end
+    x_right_end   = total_len_x  # = x_plat_end + right_len
+
+    # -------- 左半段：上楼梯 (高度逐级升高) --------
+    # 我们把 [0 : left_len) 按 step_width_idx 块切开
+    # 第0段高度 = 0
+    # 第1段高度 = step_height_idx
+    # 第2段高度 = 2*step_height_idx
+    # ...
+    # 顶部的那一级高度就是最高高度，后面平台会用这个同一个高度
+    if left_len > 0:
+        num_left_steps = (left_len + step_width_idx - 1) // step_width_idx  # ceil
+    else:
+        num_left_steps = 0
+
+    # 计算最高台阶的高度（平台高度）
+    if num_left_steps > 0:
+        top_height_val = (num_left_steps - 1) * step_height_idx
+    else:
+        top_height_val = 0
+
+    # 逐级填充左半段
+    for s in range(num_left_steps):
+        xs = x_left_start + s * step_width_idx
+        xe = min(x_left_start + (s + 1) * step_width_idx, x_left_end)
+        h_val = s * step_height_idx  # 随着s上升
+        terrain.height_field_raw[xs:xe, y1:y2] = h_val
+
+    # -------- 中间平台：恒定高度 top_height_val --------
+    terrain.height_field_raw[x_plat_start:x_plat_end, y1:y2] = top_height_val
+
+    # -------- 右半段：下楼梯 (高度逐级降低) --------
+    # 对 [x_right_start : total_len_x) 同样按 step_width_idx 切分
+    # 第一段 = top_height_val
+    # 第二段 = top_height_val - step_height_idx
+    # 直到降到0或更低，不降成负数以下（地面以下就不必要了，防止出现坑台阶）
+    if right_len > 0:
+        num_right_steps = (right_len + step_width_idx - 1) // step_width_idx
+    else:
+        num_right_steps = 0
+
+    for s in range(num_right_steps):
+        xs = x_right_start + s * step_width_idx
+        xe = min(x_right_start + (s + 1) * step_width_idx, x_right_end)
+        h_val = top_height_val - s * step_height_idx
+        if h_val < 0:
+            h_val = 0
+        terrain.height_field_raw[xs:xe, y1:y2] = h_val
+
+    return terrain
+
+
 
 
 def discrete_blocks_terrain(terrain, difficulty,
@@ -377,17 +551,47 @@ def gap_terrain(terrain, gap_size, platform_size=3.):
     terrain.height_field_raw[x4:, y1: y2] = 0
 
 def climb_terrain(terrain, depth, platform_size=1.):
-    depth = int(depth / terrain.vertical_scale)
-    x1 = int(1 / terrain.horizontal_scale)
-    length = 1.0 + 0.2 * np.random.random()
-    x2 = int((1 + length) / terrain.horizontal_scale)
-    x3 = int(6 / terrain.horizontal_scale)
-    length = 1.0 + 0.2 * np.random.random()
-    x4 = int((6 + length) / terrain.horizontal_scale)
+    # 把真实高度(米)换算到 height_field_raw 的离散高度单位
+    depth_idx = int(depth / terrain.vertical_scale)
 
+    # --- 定义两个阶梯带在 x 方向的位置和长度（沿前进方向） ---
+    # 第一道阶梯：大概出现在 x ≈ 1m
+    length1 = 1.0 + 0.2 * np.random.random()  # 随机长度, 1.0~1.2 m
+    x1 = int(1.0 / terrain.horizontal_scale)
+    x2 = int((1.0 + length1) / terrain.horizontal_scale)
 
-    terrain.height_field_raw[x1:x2, :] = depth
-    terrain.height_field_raw[x3:x4, :] = depth
+    # 第二道阶梯：大概出现在 x ≈ 6m
+    length2 = 1.0 + 0.2 * np.random.random()  # 同样随机一点长度
+    x3 = int(6.0 / terrain.horizontal_scale)
+    x4 = int((6.0 + length2) / terrain.horizontal_scale)
+
+    # --- 定义中间走廊（允许机器人走的 y 区域），两侧全是深坑 ---
+    center_y = terrain.width // 2  # 地形宽度的一半（左右方向中线）
+    # 仿照 gap_terrain 的做法：随机走廊宽度
+    width = 1.0 + 1.0 * np.random.random()   # 基础半宽（米量级）
+    half_width = 2 * width                   # 再放大一点走廊，让它不是太窄
+
+    y1 = int(center_y - half_width / terrain.horizontal_scale)
+    y2 = int(center_y + half_width / terrain.horizontal_scale)
+
+    # 边界安全裁剪，避免数组越界
+    y1 = max(y1, 0)
+    y2 = min(y2, terrain.height_field_raw.shape[1])
+
+    # --- 第一步：把左右两边（走廊外）挖成深坑 ---
+    # 这样机器人如果尝试从侧面绕开台阶，会掉下去
+    terrain.height_field_raw[:, :y1] = -1000
+    terrain.height_field_raw[:, y2:] = -1000
+
+    # --- 第二步：把中间走廊里，特定的 x 段抬高为台阶/障碍 ---
+    # 也就是让它必须“爬上/跨过”这些区段
+    terrain.height_field_raw[x1:x2, y1:y2] = depth_idx
+    terrain.height_field_raw[x3:x4, y1:y2] = depth_idx
+
+    # 走廊的其他地方我们不改，保持原高度（通常是 0）
+    # 这样机器人可以在走廊里平走 + 必须翻两个台阶
+    # 而且没法绕侧面，因为侧面全是 -1000 的深坑
+
 
 def convert_heightfield_to_trimesh(height_field_raw, horizontal_scale, vertical_scale, slope_threshold=None):
     """

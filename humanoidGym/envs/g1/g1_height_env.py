@@ -17,6 +17,7 @@ from humanoidGym.algo.ppo.utils import build_mirror_ls
 from humanoidGym.envs.base.legged_robot_config import LeggedRobotCfg
 from humanoidGym.utils import exponential_progress, quat_apply_yaw
 from humanoidGym.utils.terrain_parkour import TerrainParkour
+from humanoidGym.utils.math import wrap_to_pi
 
 from humanoidGym.utils.isaacgym_utils import get_euler_xyz as get_euler_xyz_in_tensor
 import cv2
@@ -381,11 +382,14 @@ class AmpG1HeightRobot(LeggedRobot):
             self.height_points = self._init_height_points()
             self.base_height_points = self._init_base_height_points()
             self.forward_height_points = self._init_forward_height_points()
+            self._init_height_scan_noise()
+            self.measured_heights_noise = self._get_heights_noise()
             self.measured_heights = self._get_heights()
             self.measured_forward_heights = self._get_forward_heights()
 
         else:
             self.measured_heights = 0.0
+            self.measured_heights_noise = 0.0
             
         if self.cfg.control.use_filter:
             self.action_filterd = torch.zeros(self.num_envs, self.num_actions,
@@ -663,7 +667,8 @@ class AmpG1HeightRobot(LeggedRobot):
         self.last_contacts = contact
         
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
-            # self._draw_debug_vis()
+            self._draw_debug_vis()
+            self._draw_debug_vis_noise()
             if self.cfg.depth.use_camera:
                 window_name = "Depth Image"
                 cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
@@ -785,6 +790,7 @@ class AmpG1HeightRobot(LeggedRobot):
         
         self.refreshable_randomize_props(env_ids)
         self.refreshable_randomize_lag(env_ids)
+        self._hsn_resample_scenarios(env_ids)
 
         # reset buffers
         self.actions[env_ids] = 0.
@@ -821,7 +827,21 @@ class AmpG1HeightRobot(LeggedRobot):
     
     def _post_physics_step_callback(self):
         self.update_feet_state()
-        return super()._post_physics_step_callback()
+        env_ids = (self.episode_length_buf % int(self.cfg.commands.resampling_time / self.dt)==0).nonzero(as_tuple=False).flatten()
+        self._resample_commands(env_ids)
+        if self.cfg.commands.heading_command:
+            forward = quat_apply(self.base_quat, self.forward_vec)
+            heading = torch.atan2(forward[:, 1], forward[:, 0])
+            self.commands[:, 2] = torch.clip(0.5*wrap_to_pi(self.commands[:, 3] - heading), -1., 1.)
+
+        if self.cfg.terrain.measure_heights and self.global_counter % self.cfg.depth.update_interval :
+            self.measured_heights_noise = self._get_heights_noise()
+            self.measured_heights = self._get_heights()
+            
+        # if self.cfg.domain_rand.push_robots:
+        #     self._push_robots()
+        if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
+            self._push_robots()
     
     def update_command_curriculum(self, env_ids):
         """ Implements a curriculum of increasing commands
@@ -944,8 +964,9 @@ class AmpG1HeightRobot(LeggedRobot):
         # add perceptive inputs if not blind
         if self.cfg.terrain.measure_heights:
             heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
+            heights_noise = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights_noise, -1, 1.) * self.obs_scales.height_measurements
             privileged_obs_buf = torch.cat((heights,critic_obs_history), dim=-1)
-            self.obs_buf = torch.cat([heights,self.obs_buf],dim=-1)
+            self.obs_buf = torch.cat([heights_noise,self.obs_buf],dim=-1)
         else:
             privileged_obs_buf = critic_obs_history
             
@@ -1083,23 +1104,343 @@ class AmpG1HeightRobot(LeggedRobot):
                 z = heights[j]
                 sphere_pose = gymapi.Transform(gymapi.Vec3(x, y, z), r=None)
                 gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose)
+
+    def _draw_debug_vis_noise(self):
+        """ Draws visualizations for dubugging (slows down simulation a lot).
+            Default behaviour: draws height measurement points
+        """
+        # draw height lines
+        if not self.terrain.cfg.measure_heights:
+            return
+        # self.gym.clear_lines(self.viewer)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
+        sphere_geom = gymutil.WireframeSphereGeometry(0.02, 4, 4, None, color=(1, 0, 1))
+        for i in range(self.num_envs):
+            base_pos = (self.root_states[i, :3]).cpu().numpy()
+            heights = self.measured_heights_noise[i].cpu().numpy()
+            height_points = quat_apply_yaw(self.base_quat[i].repeat(heights.shape[0]), self.height_points[i]).cpu().numpy()
+            for j in range(heights.shape[0]):
+                x = height_points[j, 0] + base_pos[0]
+                y = height_points[j, 1] + base_pos[1]
+                z = heights[j]
+                sphere_pose = gymapi.Transform(gymapi.Vec3(x, y, z), r=None)
+                gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose)
     
-    
-    def _init_forward_height_points(self):
-        """ Returns points at which the height measurments are sampled (in base frame)
+
+    # ========================= Height-Scan Noise (per paper) =========================
+    def _init_height_scan_noise(self):
+        # 开关
+        self.hsn_enabled = getattr(self.cfg.height_noise, "height_scan_noise_enable", False)
+        if not self.hsn_enabled:
+            # 仍然占位，保持接口一致
+            self._hsn_inited = True
+            # 占位张量
+            self.hsn_sid = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+            self.hsn_ep_bias_xy = torch.zeros(self.num_envs, 1, 2, device=self.device)  # [E,1,2] m
+            self.hsn_ep_bias_h  = torch.zeros(self.num_envs, 1, device=self.device)     # [E,1] m
+            # 每环境的当下参数（逐点/离群），用于 _get_heights 时按 env 广播
+            self.hsn_sigma_xy_point = torch.zeros(self.num_envs, 1, device=self.device)  # m
+            self.hsn_sigma_h_point  = torch.zeros(self.num_envs, 1, device=self.device)  # m
+            self.hsn_p_outlier      = torch.zeros(self.num_envs, 1, device=self.device)  # prob
+            self.hsn_sigma_out      = torch.zeros(self.num_envs, 1, device=self.device)  # m
+            return
+
+        # 课程序数配置：线性增长直到 1.0
+        self.hsn_csk_total_steps  = float(getattr(self.cfg.height_noise, "hsn_csk_total_steps", 2e5))  # 线性到 1.0 的总步数/迭代数
+
+        # 场景概率：Nominal/Offset/Noisy
+        probs = getattr(self.cfg.height_noise, "hsn_scenario_probs", [0.6, 0.3, 0.1])
+        assert len(probs) == 3 and sum(probs) > 0, "hsn_scenario_probs 必须是长度为3的概率列表"
+        probs = torch.tensor(probs, dtype=torch.float, device=self.device)
+        self.hsn_probs = probs / probs.sum()
+
+        # 论文 S8 给的 7 元组标量（单位~米/概率），我们映射为：
+        # z[0]=逐点XY位移 std, z[1]=逐点高度 std, z[2]=逐回合XY漂移 std, z[3]=逐回合高度漂移 std,
+        # z[4]=离群幅度 std, z[5]=离群概率 p, z[6]=保留（可当作冗余或同前者）
+        self.hsn_z_nominal = torch.tensor(
+            getattr(self.cfg.height_noise, "hsn_z_nominal", [0.004, 0.005, 0.01, 0.04, 0.03, 0.05]),
+            dtype=torch.float, device=self.device)
+        self.hsn_z_offset  = torch.tensor(
+            getattr(self.cfg.height_noise, "hsn_z_offset",  [0.004, 0.005, 0.01, 0.10, 0.10, 0.02]),
+            dtype=torch.float, device=self.device)
+        self.hsn_z_noisy   = torch.tensor(
+            getattr(self.cfg.height_noise, "hsn_z_noisy",   [0.004, 0.10, 0.10, 0.30, 0.30, 0.30]),
+            dtype=torch.float, device=self.device)
+
+        # 状态缓存
+        self.hsn_sid = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)   # 0/1/2
+        self.hsn_ep_bias_xy = torch.zeros(self.num_envs, 1, 2, device=self.device)       # [E,1,2] m
+        self.hsn_ep_bias_h  = torch.zeros(self.num_envs, 1, device=self.device)          # [E,1] m
+
+        # 每环境的当下参数（逐点/离群），用于 _get_heights 时按 env 广播
+        self.hsn_sigma_xy_point = torch.zeros(self.num_envs, 1, device=self.device)      # m
+        self.hsn_sigma_h_point  = torch.zeros(self.num_envs, 1, device=self.device)      # m
+        self.hsn_p_outlier      = torch.zeros(self.num_envs, 1, device=self.device)      # prob
+        self.hsn_sigma_out      = torch.zeros(self.num_envs, 1, device=self.device)      # m
+
+        # 首次采样一遍
+        self._hsn_resample_scenarios(torch.arange(self.num_envs, device=self.device))
+        self._hsn_inited = True
+
+
+    def _hsn_curriculum_scale(self):
+        # 课程序数 c_sk ∈ [0,1]，线性上升
+        prog = float(self.common_step_counter)
+        if  getattr(self.cfg.height_noise, "hsn_curriculum",  False):
+            c_sk = max(0.0, min(1.0, prog / max(1.0, self.hsn_csk_total_steps)))
+        else:
+            c_sk = 1
+        return c_sk
+
+
+    def _hsn_pick_z_for_sid(self, sid, csk):
+        # 根据场景选择 z，并按论文在 Offset/Noisy 中对部分分量乘以 c_sk
+        # 复制以免原表被改动
+        if sid == 0:
+            z = self.hsn_z_nominal.clone()
+            # Nominal：不缩放
+        elif sid == 1:
+            z = self.hsn_z_offset.clone()
+            # Offset：放大“逐回合相关”的项（z[3], z[4]）随 csk
+            z[3] *= csk  # episode 高度漂移
+            z[4] *= csk  # outlier 幅度
+        else:
+            z = self.hsn_z_noisy.clone()
+            # Noisy：放大“逐点/离群/漂移”等多项随 csk
+            z[1] *= csk  # point 高度
+            z[2] *= csk  # episode XY 漂移
+            z[3] *= csk  # episode 高度漂移
+            z[4] *= csk  # outlier 幅度
+            z[5] *= csk  # outlier 概率
+        # 裁剪概率
+        z[5] = torch.clamp(z[5], 0.0, 0.95)
+        return z
+
+
+    @torch.no_grad()
+    def _hsn_resample_scenarios(self, env_ids: torch.Tensor):
+        # 为给定环境重采样场景 + 逐回合漂移，并更新每环境的 sigma/p
+        if not getattr(self, "hsn_enabled", False):
+            return
+        if env_ids.numel() == 0:
+            return
+
+        # 抽场景
+        sid = torch.multinomial(self.hsn_probs, num_samples=env_ids.numel(), replacement=True).to(self.device)
+        self.hsn_sid[env_ids] = sid
+
+        # 课程序数
+        csk = self._hsn_curriculum_scale()
+
+        # 为每个环境计算 z，并采样逐回合漂移（w_xy,w_h）
+        for i, eid in enumerate(env_ids.tolist()):
+            z = self._hsn_pick_z_for_sid(int(sid[i].item()), csk)
+            # 写入逐点与离群参数（按 env 存）
+            self.hsn_sigma_xy_point[eid, 0] = z[0]   # m
+            self.hsn_sigma_h_point[eid, 0]  = z[1]   # m
+            self.hsn_p_outlier[eid, 0]      = z[5]   # prob
+            self.hsn_sigma_out[eid, 0]      = z[4]   # m
+
+            # 逐回合漂移采样：XY & 高度（米）
+            sigma_xy_ep = float(z[2])
+            sigma_h_ep  = float(z[3])
+            if sigma_xy_ep > 0:
+                self.hsn_ep_bias_xy[eid, 0, :] = torch.randn(2, device=self.device) * sigma_xy_ep
+            else:
+                self.hsn_ep_bias_xy[eid, 0, :].zero_()
+
+            if sigma_h_ep > 0:
+                self.hsn_ep_bias_h[eid, 0] = torch.randn(1, device=self.device) * sigma_h_ep
+            else:
+                self.hsn_ep_bias_h[eid, 0] = 0.0
+  
+
+    def _get_heights_noise(self, env_ids=None):
+        """Samples heights around each robot with paper-style noise (point/episode/outlier).
+        Returns [E,P] in meters.
+        """
+
+        # 情况1：平地，没必要加假噪声，直接返回 0（和你原实现一样）
+        if self.cfg.terrain.mesh_type == 'plane':
+            return torch.zeros(self.num_envs, self.num_height_points, device=self.device, requires_grad=False)
+        elif self.cfg.terrain.mesh_type == 'none':
+            raise NameError("Can't measure height with terrain mesh type 'none'")
+
+        # 取当前要处理的环境子集
+        if env_ids is not None:
+            env_ids_t = env_ids
+            base_quat = self.base_quat[env_ids_t]          # [E, 4]
+            base_pos  = self.root_states[env_ids_t, :3]    # [E, 3]
+            hp        = self.height_points[env_ids_t].clone()  # [E, P, 3]
+
+            if getattr(self, "hsn_enabled", False):
+                sigma_xy_point = self.hsn_sigma_xy_point[env_ids_t]  # [E,1]
+                ep_bias_xy     = self.hsn_ep_bias_xy[env_ids_t]      # [E,1,2]
+                sigma_h_point  = self.hsn_sigma_h_point[env_ids_t]   # [E,1]
+                ep_bias_h      = self.hsn_ep_bias_h[env_ids_t]       # [E,1]
+                p_outlier      = self.hsn_p_outlier[env_ids_t]       # [E,1]
+                sigma_out      = self.hsn_sigma_out[env_ids_t]       # [E,1]
+            else:
+                sigma_xy_point = None
+                ep_bias_xy     = None
+                sigma_h_point  = None
+                ep_bias_h      = None
+                p_outlier      = None
+                sigma_out      = None
+        else:
+            base_quat = self.base_quat                        # [E,4]
+            base_pos  = self.root_states[:, :3]               # [E,3]
+            hp        = self.height_points.clone()            # [E,P,3]
+
+            if getattr(self, "hsn_enabled", False):
+                sigma_xy_point = self.hsn_sigma_xy_point      # [E,1]
+                ep_bias_xy     = self.hsn_ep_bias_xy          # [E,1,2]
+                sigma_h_point  = self.hsn_sigma_h_point       # [E,1]
+                ep_bias_h      = self.hsn_ep_bias_h           # [E,1]
+                p_outlier      = self.hsn_p_outlier           # [E,1]
+                sigma_out      = self.hsn_sigma_out           # [E,1]
+            else:
+                sigma_xy_point = None
+                ep_bias_xy     = None
+                sigma_h_point  = None
+                ep_bias_h      = None
+                p_outlier      = None
+                sigma_out      = None
+
+        E, P, _ = hp.shape
+        horiz_scale = self.terrain.cfg.horizontal_scale
+        vert_scale  = self.terrain.cfg.vertical_scale
+        border      = self.terrain.cfg.border_size
+
+        # ================== 论文里的 "lateral shift" / 逐点位置噪声 ==================
+        # 在旋转到世界系之前，在机器人base系里往 x,y 方向加噪声
+        # 这是论文里的 ε_px, ε_py ~ N(0, z0)（逐点白噪）+ w_xy（逐回合漂移）:contentReference[oaicite:1]{index=1}
+        if getattr(self, "hsn_enabled", False):
+            # 把 [E,1] 变成 [E,1,1]，好让它广播到 [E,P,2]
+            sigma_xy_point_b = sigma_xy_point.view(E, 1, 1)  # 每个env一个σ，扩到所有点、x/y两个轴
+
+            # 逐点噪声: [E,P,2]，每个点独立高斯
+            eps_xy = torch.randn(E, P, 2, device=self.device) * sigma_xy_point_b  # [E,P,2]
+
+            # ep_bias_xy: [E,1,2]，逐回合固定漂移（w_x, w_y）
+            # 广播加到所有 P 个点
+            hp[:, :, :2] = hp[:, :, :2] + ep_bias_xy + eps_xy
+            # 现在 hp[:, :, :2] = 名义网格点 + 回合级漂移 + 逐点白噪声
+        # ===========================================================================
+
+        # 把带噪声的 base-frame 网格点旋转到世界系，再加上基座的平移
+        # quat_apply_yaw(base_quat.repeat(1,P), hp) 仍然是你原来的 yaw-only 变换
+        points = quat_apply_yaw(base_quat.repeat(1, P), hp) + base_pos.unsqueeze(1)  # [E,P,3]
+
+        # 平移到 heightfield 的索引系（border 偏移 + 水平缩放），并离散成栅格索引
+        points = points + border
+        points_idx = (points / horiz_scale).long()  # [E,P,3] -> integer grid idx
+
+        # clip 保证索引合法（留出 +1 访问邻居）
+        px = torch.clip(points_idx[:, :, 0].reshape(-1),
+                        0, self.height_samples.shape[0] - 2)
+        py = torch.clip(points_idx[:, :, 1].reshape(-1),
+                        0, self.height_samples.shape[1] - 2)
+
+        # 原生采样逻辑：取 (x,y), (x+1,y), (x,y+1) 的最小高度，抗台阶/障碍
+        h1 = self.height_samples[px,     py    ]
+        h2 = self.height_samples[px + 1, py    ]
+        h3 = self.height_samples[px,     py + 1]
+        h  = torch.min(torch.min(h1, h2), h3).view(E, P)
+
+        # 高度单位转成米（vertical_scale）
+        h = h * vert_scale  # [E,P] in meters
+
+        # ================== 论文里的 "height perturbation" & outliers ==================
+        # 下面三步对应论文中：
+        #   - 逐回合高度漂移 w_z
+        #   - 逐点高度扰动 ε_pz ~ N(0, z1)
+        #   - 离群点 (高幅度噪声, 以概率 p_outlier 触发) :contentReference[oaicite:2]{index=2}
+        if getattr(self, "hsn_enabled", False):
+            # 把 [E,1] reshape 成 [E,1]（对高度是 [E,P]，这种广播已经OK，
+            # 但我们还是 .view(E,1) 明示这一步是在 env 维度上常数）
+            ep_bias_h_b     = ep_bias_h.view(E, 1)        # 回合级高度漂移 w_z
+            sigma_h_point_b = sigma_h_point.view(E, 1)    # 逐点高度噪声 std
+            p_outlier_b     = p_outlier.view(E, 1)        # 离群概率
+            sigma_out_b     = sigma_out.view(E, 1)        # 离群幅度 std
+
+            # 逐回合高度漂移（每个环境一个常数，整回合不变）
+            h = h + ep_bias_h_b  # [E,P] + [E,1] -> 广播到整排P个点
+
+            # 逐点高度白噪声
+            h = h + torch.randn_like(h) * sigma_h_point_b  # [E,P] * [E,1] -> 每个env自己的std
+
+            # 离群点：用伯努利掩码决定哪些点中毒
+            m_out = (torch.rand_like(h) < p_outlier_b)     # [E,P] < [E,1] 广播
+            if m_out.any():
+                h = h + m_out * (torch.randn_like(h) * sigma_out_b)
+        # ===========================================================================
+
+        return h
+
+
+    def _get_heights(self, env_ids=None):
+        """ Samples heights of the terrain at required points around each robot.
+            The points are offset by the base's position and rotated by the base's yaw
+
+        Args:
+            env_ids (List[int], optional): Subset of environments for which to return the heights. Defaults to None.
+
+        Raises:
+            NameError: [description]
 
         Returns:
-            [torch.Tensor]: Tensor of shape (num_envs, self.num_height_points, 3)
+            [type]: [description]
         """
-        y = torch.tensor(self.cfg.terrain.measured_forward_points_y, device=self.device, requires_grad=False)
-        x = torch.tensor(self.cfg.terrain.measured_forward_points_x, device=self.device, requires_grad=False)
-        grid_x, grid_y = torch.meshgrid(x, y)
 
-        self.num_forward_height_points = grid_x.numel()
-        points = torch.zeros(self.num_envs, self.num_forward_height_points, 3, device=self.device, requires_grad=False)
-        points[:, :, 0] = grid_x.flatten()
-        points[:, :, 1] = grid_y.flatten()
-        return points
+        if self.cfg.terrain.mesh_type == 'plane':
+            return torch.zeros(self.num_envs, self.num_height_points, device=self.device, requires_grad=False)
+        elif self.cfg.terrain.mesh_type == 'none':
+            raise NameError("Can't measure height with terrain mesh type 'none'")
+
+        if env_ids:
+            # height_points is in base frame
+            # points is in world frame
+            points = quat_apply_yaw(self.base_quat[env_ids].repeat(1, self.num_height_points), self.height_points[env_ids]) + (self.root_states[env_ids, :3]).unsqueeze(1)
+        else:
+            points = quat_apply_yaw(self.base_quat.repeat(1, self.num_height_points), self.height_points) + (self.root_states[:, :3]).unsqueeze(1)
+
+        points += self.terrain.cfg.border_size
+        # points position to int row col
+        points = (points/self.terrain.cfg.horizontal_scale).long()
+
+        # px get all robot points(x)
+        px = points[:, :, 0].view(-1)
+        # py get all robot points(y)
+        py = points[:, :, 1].view(-1)
+        # clip within whole terrain
+        px = torch.clip(px, 0, self.height_samples.shape[0]-2)
+        py = torch.clip(py, 0, self.height_samples.shape[1]-2)
+
+        # select (x,y) (x+1,y) (x,y+1), min height as heights
+        heights1 = self.height_samples[px, py]
+        heights2 = self.height_samples[px+1, py]
+        heightXBotL = self.height_samples[px, py+1]
+        heights = torch.min(heights1, heights2)
+        heights = torch.min(heights, heightXBotL)
+
+        return heights.view(self.num_envs, -1) * self.terrain.cfg.vertical_scale
+
+    def _init_forward_height_points(self):
+            """ Returns points at which the height measurments are sampled (in base frame)
+
+            Returns:
+                [torch.Tensor]: Tensor of shape (num_envs, self.num_height_points, 3)
+            """
+            y = torch.tensor(self.cfg.terrain.measured_forward_points_y, device=self.device, requires_grad=False)
+            x = torch.tensor(self.cfg.terrain.measured_forward_points_x, device=self.device, requires_grad=False)
+            grid_x, grid_y = torch.meshgrid(x, y)
+
+            self.num_forward_height_points = grid_x.numel()
+            points = torch.zeros(self.num_envs, self.num_forward_height_points, 3, device=self.device, requires_grad=False)
+            points[:, :, 0] = grid_x.flatten()
+            points[:, :, 1] = grid_y.flatten()
+            return points
     
     def _get_forward_heights(self, env_ids=None):
         """ Samples heights of the terrain at required points around each robot.
@@ -1374,6 +1715,6 @@ class AmpG1HeightRobot(LeggedRobot):
         self.feet_at_edge = self.contact_filt & feet_at_edge
         rew = (self.terrain_levels > 3) * torch.sum(self.feet_at_edge, dim=-1)
 
-        edge_reward = torch.zeros_like(rew)
-        edge_reward[self.gap_start_idx:self.pit_end_idx] = rew[self.gap_start_idx:self.pit_end_idx]
-        return edge_reward
+        # edge_reward = torch.zeros_like(rew)
+        # edge_reward[self.gap_start_idx:self.pit_end_idx] = rew[self.gap_start_idx:self.pit_end_idx]
+        return rew
