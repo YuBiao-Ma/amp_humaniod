@@ -247,17 +247,17 @@ class TerrainParkour:
                                                  downsampled_scale=0.2)
 
         elif choice < self.proportions[7]:
-            # discrete_blocks_terrain(terrain, difficulty,
-            #                 corridor_w=2, margin=0.0,
-            #                 size_easy=0.9, size_hard=0.25,
-            #                 gap_easy=0.05,  gap_hard=0.15,
-            #                 h_easy=10,    h_hard=10,
-            #                 stagger=True, p_drop=0.0)
-            num_rectangles = 20
-            rectangle_min_size = 1.
-            rectangle_max_size = 2.
-            terrain_utils.discrete_obstacles_terrain(terrain, discrete_obstacles_height, rectangle_min_size,
-                                                     rectangle_max_size, num_rectangles, platform_size=3.)
+            discrete_blocks_terrain(terrain, difficulty,
+                            corridor_w=2, margin=0.0,
+                            size_easy=0.9, size_hard=0.25,
+                            gap_easy=0.05,  gap_hard=0.15,
+                            h_easy=10,    h_hard=10,
+                            stagger=True, p_drop=0.0)
+            # num_rectangles = 20
+            # rectangle_min_size = 1.
+            # rectangle_max_size = 2.
+            # terrain_utils.discrete_obstacles_terrain(terrain, discrete_obstacles_height, rectangle_min_size,
+            #                                          rectangle_max_size, num_rectangles, platform_size=3.)
             terrain_utils.random_uniform_terrain(terrain, min_height=-0.05, max_height=0.05, step=0.005,
                                                  downsampled_scale=0.2)
 

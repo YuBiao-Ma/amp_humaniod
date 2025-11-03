@@ -59,10 +59,12 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
 
         num_height = 187
         num_single_observations = 72 + num_height
-        num_critic_single_observations = 80
+        num_critic_single_observations = 80 + 20
        
         num_actions = 21
         num_obs_lens = 1
+        num_amp_obs_lens = 5
+        num_amp_observations = 61
         critic_num_obs_lens = 1
         num_observations = num_obs_lens * num_single_observations
         num_privileged_obs = num_critic_single_observations*critic_num_obs_lens + num_height 
@@ -152,7 +154,7 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
         num_rows = 10  # number of terrain rows (levels)
         num_cols = 20  # number of terrain cols (types)
         # terrain types: [wave, rough slope, stairs up, stairs down, discrete, gap, pit, tilt, crawl, rough_flat]
-        terrain_proportions = [0.0, 0.15, 0.0, 0.25, 0.0, 0.15, 0.25, 0.05, 0.25, 0.00]
+        terrain_proportions = [0.0, 0.15, 0.0, 0.25, 0.0, 0.15, 0.25, 0.25, 0.05, 0.00]
         # terrain_proportions = [0, 1.0, 0.0, 0, 0, 0, 0, 0, 0]
         # trimesh only:
         slope_treshold = 0.75  # slopes above this threshold will be corrected to vertical surfaces
@@ -286,9 +288,10 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
         soft_torque_limit = 0.8
         base_height_target = 0.78
         max_contact_force = 500
+        foothold_eps = 0.05
         reward_curriculum = True
-        reward_curriculum_term = ["feet_edge"]
-        reward_curriculum_schedule = [[1000, 4000, 0.1, 1.0]]
+        reward_curriculum_term = ["feet_edge","yaw_error_when_rate_matches","foothold"]
+        reward_curriculum_schedule = [[1000, 4000, 0.1, 1.0],[4000, 10000, 0.3, 1.0],[4000, 10000, 0.1, 5.0]]
         # only_positive_rewards = False
         class scales( LeggedRobotCfg.rewards.scales ):
             tracking_lin_vel = 3.0
@@ -311,9 +314,9 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
             ankle_roll_energy = 0.1
             # ankle_action_pitch = -0.05
             # ankle_action_roll = -0.1    
-            yaw_error_when_rate_matches = -0.3
+            yaw_error_when_rate_matches = -1
             # lin_error_when_command = -10
-            stumble = -5.0
+            stumble = -1.0
             # termination = -10
                 
             dof_vel_limits = -0.1
@@ -322,6 +325,8 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
 
             feet_edge = -3
             cheat = -0.5
+
+            foothold = -3
      
                 
             dof_vel_limits = -0.1

@@ -127,6 +127,23 @@ class AMPLoader:
             times = self.traj_time_sample_batch(traj_idxs)
             self.preloaded_s = self.get_full_frame_at_time_batch(traj_idxs, times)
             self.preloaded_s_next = self.get_full_frame_at_time_batch(traj_idxs, times + self.time_between_frames)
+
+            # ---- 往前 4 帧 + 当前帧，一共 5 帧 ----
+            # 生成 5 个时间：t-4dt, t-3dt, t-2dt, t-dt, t
+            history_t_list = []
+            for k in range(4, -1, -1):  # 4,3,2,1,0  -> 对应 t-4dt ... t
+                t_k = times - k * self.time_between_frames
+                history_t_list.append(t_k)
+
+            # 逐个时间取帧
+            history_frames = []
+            for t_k in history_t_list:
+                s_k = self.get_full_frame_at_time_batch(traj_idxs, t_k)  # (N, 67)
+                history_frames.append(s_k)
+
+            # stack 成 (N, 5, 67)
+            # 注意：history_frames 里是 [t-4dt, t-3dt, t-2dt, t-dt, t]
+            self.preloaded_s_history = torch.stack(history_frames, dim=1)
             print(f'Finished preloading')
 
 
@@ -318,6 +335,11 @@ class AMPLoader:
                 s_next = torch.cat([
                     s_next,
                     self.preloaded_s_next[idxs, AMPLoader.ROOT_POS_START_IDX + 2:AMPLoader.ROOT_POS_START_IDX + 3]], dim=-1)
+                s_history = self.preloaded_s_history[idxs,:, AMPLoader.JOINT_POSE_START_IDX:AMPLoader.JOINT_VEL_END_IDX]
+                s_history = torch.cat([
+                    s_history,
+                    self.preloaded_s_history[idxs,:, AMPLoader.ROOT_POS_START_IDX + 2:AMPLoader.ROOT_POS_START_IDX + 3]], dim=-1)
+
             else:
                 s, s_next = [], []
                 traj_idxs = self.weighted_traj_idx_sample_batch(mini_batch_size)
@@ -330,7 +352,7 @@ class AMPLoader:
                 
                 s = torch.vstack(s)
                 s_next = torch.vstack(s_next)
-            yield s, s_next
+            yield s_history.reshape(s.shape[0],-1), s_next
 
     @property
     def observation_dim(self):

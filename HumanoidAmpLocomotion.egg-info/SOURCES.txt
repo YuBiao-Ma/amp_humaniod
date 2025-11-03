@@ -9,6 +9,10 @@ humanoidGym/algo/vec_env.py
 humanoidGym/algo/dataset/motion_loader.py
 humanoidGym/algo/dataset/motion_util.py
 humanoidGym/algo/dataset/pose3d.py
+humanoidGym/algo/dreamer/__init__.py
+humanoidGym/algo/dreamer/models.py
+humanoidGym/algo/dreamer/networks.py
+humanoidGym/algo/dreamer/tools.py
 humanoidGym/envs/__init__.py
 humanoidGym/utils/__init__.py
 humanoidGym/utils/helpers.py
@@ -17,3 +21,5 @@ humanoidGym/utils/logger.py
 humanoidGym/utils/math.py
 humanoidGym/utils/task_registry.py
 humanoidGym/utils/terrain.py
+humanoidGym/utils/terrain_parkour.py
+humanoidGym/utils/trimesh.py

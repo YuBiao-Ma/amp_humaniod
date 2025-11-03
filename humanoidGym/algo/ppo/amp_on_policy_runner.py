@@ -50,7 +50,7 @@ class AmpOnPolicyRunner:
             num_preload_transitions=train_cfg['runner']['amp_num_preload_transitions'],
             motion_files=self.cfg["amp_motion_files"])
         
-        amp_state_normalizer = EmpiricalNormalization(shape=amp_data.observation_dim).to(self.device)
+        amp_state_normalizer = EmpiricalNormalization(shape=(amp_data.observation_dim*self.env.cfg.env.num_amp_obs_lens)).to(self.device)
         
         if self.cfg["normalize_style_reward"]:
             style_reward_normalizer = EmpiricalNormalization(shape=1).to(self.device)
@@ -59,7 +59,7 @@ class AmpOnPolicyRunner:
             
         discriminator = Discriminator(
             observation_dim=amp_data.observation_dim,
-            observation_horizon=2, # set 2 for now
+            observation_horizon=self.env.cfg.env.num_amp_obs_lens, # set 2 for now
             device=self.device,
             **self.discriminator_cfg).to(self.device)
         
@@ -134,6 +134,7 @@ class AmpOnPolicyRunner:
         obs, extras = self.env.get_observations()
         critic_obs = extras["observations"].get("critic", obs)
         amp_obs = self.env.get_amp_observations()
+        amp_obs_hist = self.env.update_current_amp_state(amp_obs)
         obs, critic_obs, amp_obs = obs.to(self.device), critic_obs.to(self.device), amp_obs.to(self.device)
         
         # init normalize
@@ -167,10 +168,10 @@ class AmpOnPolicyRunner:
             with torch.inference_mode():
                 for _ in range(self.num_steps_per_env):
                     # Sample actions from policy
-                    actions = self.alg.act(obs, critic_obs, amp_obs)
+                    actions = self.alg.act(obs, critic_obs, amp_obs_hist)
                     
                     # save amp state for style reward prediction 
-                    self.env.update_current_amp_state(amp_obs)
+                    amp_obs_hist = self.env.update_current_amp_state(amp_obs)
                     
                     # Step environment
                     obs, rewards, dones, infos = self.env.step(actions.to(self.env.device))
@@ -412,7 +413,13 @@ class AmpOnPolicyRunner:
         torch.save(saved_dict, path)
 
     def load(self, path: str, load_optimizer: bool = True):
-        loaded_dict = torch.load(path, weights_only=False)
+
+       
+        loaded_dict = torch.load(
+            path,
+            map_location=self.device
+        )
+        # loaded_dict = torch.load(path, weights_only=False)
         # -- Load PPO model
         self.alg.actor_critic.load_state_dict(loaded_dict["model_state_dict"])
         # -- Load AMP related

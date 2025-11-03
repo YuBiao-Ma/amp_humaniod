@@ -127,6 +127,7 @@ class AMPPPO:
         
         self.amp_storage = ReplayBuffer(
             discriminator.observation_dim,
+            discriminator.input_dim,  # obs_dim*obs_len
             amp_replay_buffer_size, 
             device
         )
@@ -179,7 +180,7 @@ class AMPPPO:
     def train_mode(self):
         self.actor_critic.train()
 
-    def act(self, obs, critic_obs, amp_obs):
+    def act(self, obs, critic_obs, amp_obs_hist):
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
         # Compute the actions and values
@@ -192,7 +193,7 @@ class AMPPPO:
         self.transition.observations = obs
         self.transition.critic_observations = critic_obs
         # record amp obs
-        self.amp_transition.observations = amp_obs
+        self.amp_transition.observations = amp_obs_hist
         return self.transition.actions
 
     def process_env_step(self, rewards, dones, infos, amp_obs, next_critic_obs):
@@ -393,16 +394,18 @@ class AMPPPO:
                 self.storage.num_envs * self.storage.num_transitions_per_env // self.discriminator_num_mini_batches)
         
         for sample_amp_policy, sample_amp_expert in zip(amp_policy_generator,amp_expert_generator):
-            policy_state, policy_next_state = sample_amp_policy
-            expert_state, expert_next_state = sample_amp_expert
+            policy_state_hist, policy_next_state = sample_amp_policy
+            expert_state_hist, expert_next_state = sample_amp_expert
             if self.amp_state_normalizer is not None:
                 with torch.no_grad():# 标准化的同时进行更新
-                    policy_state = self.amp_state_normalizer(policy_state)
-                    policy_next_state = self.amp_state_normalizer(policy_next_state)
-                    expert_state = self.amp_state_normalizer(expert_state)
-                    expert_next_state = self.amp_state_normalizer(expert_next_state)
-            policy_d = self.discriminator(torch.cat([policy_state,policy_next_state],dim=-1))
-            expert_d = self.discriminator(torch.cat([expert_state,expert_next_state],dim=-1))
+                    policy_state_hist = self.amp_state_normalizer(policy_state_hist)
+                    # policy_next_state = self.amp_state_normalizer(policy_next_state)
+                    expert_state_hist = self.amp_state_normalizer(expert_state_hist)
+                    # expert_next_state = self.amp_state_normalizer(expert_next_state)
+            # policy_d = self.discriminator(torch.cat([policy_state,policy_next_state],dim=-1))
+            # expert_d = self.discriminator(torch.cat([expert_state,expert_next_state],dim=-1))
+            policy_d = self.discriminator(policy_state_hist)
+            expert_d = self.discriminator(expert_state_hist)
             if self.discriminator_loss_function == "BCEWithLogitsLoss":
                 expert_loss = torch.nn.BCEWithLogitsLoss()(expert_d, torch.ones_like(expert_d))
                 policy_loss = torch.nn.BCEWithLogitsLoss()(policy_d, torch.zeros_like(policy_d))
@@ -431,7 +434,7 @@ class AMPPPO:
                 #amp_loss =  -torch.nn.functional.logsigmoid(F.tanh(eta*expert_d) - F.tanh(eta*policy_d)).mean()
                 # amp_loss =  -torch.nn.functional.logsigmoid(expert_d - policy_d).mean()
                 grad_pen_loss = self.discriminator.compute_wgan_pen(
-                     *sample_amp_expert, *sample_amp_policy, lambda_=self.discriminator_gradient_penalty_coef)
+                     policy_state_hist, expert_state_hist, lambda_=self.discriminator_gradient_penalty_coef)
                 # grad_pen_loss = self.discriminator.compute_pair_pen(
                 #      *sample_amp_expert, *sample_amp_policy, lambda_=self.discriminator_gradient_penalty_coef)
                 #compute_grad_pen

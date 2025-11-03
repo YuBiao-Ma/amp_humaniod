@@ -22,8 +22,8 @@ def play(args):
     # env_cfg.terrain.num_rows = 5
     # env_cfg.terrain.num_cols = 1
     #env_cfg.terrain.mesh_type = 'plane'
-    env_cfg.terrain.curriculum = True
-    env_cfg.terrain.selected = True
+    env_cfg.terrain.curriculum = False
+    env_cfg.terrain.selected = False
     env_cfg.noise.add_noise = False
     env_cfg.domain_rand.randomize_friction = False
     env_cfg.domain_rand.push_robots = False
@@ -39,7 +39,7 @@ def play(args):
     env_cfg.domain_rand.randomize_inertia = False
 
     env_cfg.env.test = False
-    env_cfg.commands.ranges.lin_vel_x = [0.6,0.6]
+    env_cfg.commands.ranges.lin_vel_x = [1.5,1.5]
     env_cfg.commands.ranges.lin_vel_y = [0,0]
     env_cfg.commands.ranges.heading = [0,0]
     env_cfg.commands.ranges.ang_vel_yaw = [0,0]

@@ -15,6 +15,9 @@
                 // "--headless",
                 // "--load_run=Oct26_12-02-21_vaild_g1_amp",
                 // "--resume"
+                "--rl_device=cuda:1",
+                "--sim_device=cuda:1",
+                "--run_name=V2"
               
             ]
         },
@@ -30,9 +33,11 @@
                 // "--num_envs", "1",
                 // "--experiment_name","1",
                 // "--load_run=Oct28_21-15-40_vaild_g1_amp",
-                // "--load_run=Oct27_18-11-30_vaild_g1_amp_v2_new_data_111",
+                // "--load_run=server_v2",
                 //  "--num_envs", "16",
-                //   "--checkpoint=5000",
+                //   "--checkpoint=13000",
+                "--rl_device=cpu",
+                "--sim_device=cpu",
 
               
             ]
@@ -49,7 +54,7 @@
                 // "--rl_device=cpu",
                 // "--num_envs", "1",
                 // "--experiment_name","1",
-                // "--load_run=Oct18_19-44-43_vaild_g1_amp",
+                "--load_run=Oct18_19-44-43_vaild_g1_amp",
                 //  "--num_envs", "16",
                 //   "--checkpoint=1100",
                 // "--terrain=crawl"

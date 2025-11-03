@@ -65,16 +65,13 @@ class Discriminator(nn.Module):
     
     def compute_wgan_pen(self,
                          expert_state,
-                         expert_next_state,
                          policy_state, 
-                         policy_next_state,
                          lambda_=10):
         # get lerped data
         with torch.no_grad():
-            expert_data = torch.cat([expert_state, expert_next_state], dim=-1)
-            policy_data = torch.cat([policy_state, policy_next_state], dim=-1)
-            lerp_factor = torch.rand_like(expert_data,device=expert_data.device)
-            lerped_data = lerp_factor*expert_data + (1-lerp_factor)*policy_data
+        
+            lerp_factor = torch.rand_like(expert_state,device=expert_state.device)
+            lerped_data = lerp_factor*policy_state + (1-lerp_factor)*policy_state
         lerped_data.requires_grad = True
         
         disc = self.architecture(lerped_data)
@@ -157,11 +154,11 @@ class Discriminator(nn.Module):
             state_normalizer.eval() # 避免少量数据影响state的标准化，此标准化只在ppo中发生
             if state_normalizer is not None:
                 state = state_normalizer(state)
-                next_state = state_normalizer(next_state)
+                # next_state = state_normalizer(next_state)
             state_normalizer.train()
             
-            state_input = torch.cat([state,next_state],dim=-1)
-            d = self.architecture(state_input)
+            # state_input = torch.cat([state,next_state],dim=-1)
+            d = self.architecture(state)
             
             if self.style_reward_function == "quad_mapping":
                 style_reward = self.reward_coef * torch.clamp(1 - (1/4) * torch.square(d - 1), min=0)

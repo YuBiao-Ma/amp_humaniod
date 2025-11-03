@@ -5,12 +5,12 @@ import numpy as np
 class ReplayBuffer:
     """Fixed-size buffer to store experience tuples."""
 
-    def __init__(self, obs_dim, buffer_size, device):
+    def __init__(self, obs_dim,input_dim, buffer_size, device):
         """Initialize a ReplayBuffer object.
         Arguments:
             buffer_size (int): maximum size of buffer
         """
-        self.states = torch.zeros(buffer_size, obs_dim).to(device)
+        self.states = torch.zeros(buffer_size, input_dim).to(device)
         self.next_states = torch.zeros(buffer_size, obs_dim).to(device)
         self.buffer_size = buffer_size
         self.device = device

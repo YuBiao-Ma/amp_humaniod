@@ -41,24 +41,25 @@ class AmpG1HeightRobot(LeggedRobot):
 
         self.cfg = cfg
         # get terrain type idx
+        # terrain_proportions = [0.0, 0.15, 0.0, 0.25, 0.0, 0.15, 0.25, 0.25, 0.05, 0.00]
         self.wave_start_idx = 0
         self.wave_end_idx = math.ceil(self.cfg.env.num_envs * sum(self.cfg.terrain.terrain_proportions[:1]))
         self.slope_start_idx = self.wave_end_idx
-        self.slope_end_idx = math.ceil(self.cfg.env.num_envs * sum(self.cfg.terrain.terrain_proportions[:2]))
+        self.slope_end_idx = math.ceil(self.cfg.env.num_envs * sum(self.cfg.terrain.terrain_proportions[:2])) # slope
         self.stairup_start_idx = self.slope_end_idx
         self.stairup_end_idx = math.ceil(self.cfg.env.num_envs * sum(self.cfg.terrain.terrain_proportions[:3]))
         self.stairdown_start_idx = self.stairup_end_idx
-        self.stairdown_end_idx = math.ceil(self.cfg.env.num_envs * sum(self.cfg.terrain.terrain_proportions[:4]))
+        self.stairdown_end_idx = math.ceil(self.cfg.env.num_envs * sum(self.cfg.terrain.terrain_proportions[:4])) # stair down [xiao]
         self.discrete_start_idx = self.stairdown_end_idx
         self.discrete_end_idx = math.ceil(self.cfg.env.num_envs * sum(self.cfg.terrain.terrain_proportions[:5]))
         self.gap_start_idx = self.discrete_end_idx
-        self.gap_end_idx = math.ceil(self.cfg.env.num_envs * sum(self.cfg.terrain.terrain_proportions[:6]))
+        self.gap_end_idx = math.ceil(self.cfg.env.num_envs * sum(self.cfg.terrain.terrain_proportions[:6])) # gap
         self.pit_start_idx = self.gap_end_idx
-        self.pit_end_idx = math.ceil(self.cfg.env.num_envs * sum(self.cfg.terrain.terrain_proportions[:7]))
+        self.pit_end_idx = math.ceil(self.cfg.env.num_envs * sum(self.cfg.terrain.terrain_proportions[:7])) # climb
         self.tilt_start_idx = self.pit_end_idx
-        self.tilt_end_idx = math.ceil(self.cfg.env.num_envs * sum(self.cfg.terrain.terrain_proportions[:8]))
+        self.tilt_end_idx = math.ceil(self.cfg.env.num_envs * sum(self.cfg.terrain.terrain_proportions[:8])) # meihua [xiao]
         self.crawl_start_idx = self.tilt_end_idx
-        self.crawl_end_idx = math.ceil(self.cfg.env.num_envs * sum(self.cfg.terrain.terrain_proportions[:9]))
+        self.crawl_end_idx = math.ceil(self.cfg.env.num_envs * sum(self.cfg.terrain.terrain_proportions[:9])) # beam  [xiao]
         self.roughflat_start_idx = self.crawl_end_idx
         self.roughflat_end_idx = self.cfg.env.num_envs
         
@@ -103,7 +104,12 @@ class AmpG1HeightRobot(LeggedRobot):
 
     def update_current_amp_state(self,obs):
         self.cur_amp_state_obs = obs.clone().detach()
-        
+        self.amp_obs_history_list.append(self.cur_amp_state_obs)
+        amp_obs_history = torch.stack([self.amp_obs_history_list[i] for i in range(self.amp_obs_history_list.maxlen)],dim=1)
+        self.amp_obs_history = amp_obs_history.reshape(self.num_envs, -1)
+        return self.amp_obs_history
+
+
     def _create_envs(self):
         """ Creates environments:
              1. loads the robot URDF/MJCF asset,
@@ -420,10 +426,15 @@ class AmpG1HeightRobot(LeggedRobot):
         print(self.dof_dict)
         # history of observations
         self.obs_history = deque(maxlen=self.cfg.env.num_obs_lens)
+        self.amp_obs_history_list = deque(maxlen=self.cfg.env.num_amp_obs_lens)
+        self.amp_obs_history  = torch.zeros(self.num_envs, self.cfg.env.num_amp_obs_lens*self.cfg.env.num_amp_observations, device=self.device, dtype=torch.float)
         self.critic_obs_history = deque(maxlen=self.cfg.env.critic_num_obs_lens)
         
         for _ in range(self.cfg.env.num_obs_lens):
             self.obs_history.append(torch.zeros(self.num_envs, self.cfg.env.num_single_observations,dtype=torch.float, device=self.device))
+
+        for _ in range(self.cfg.env.num_amp_obs_lens):
+            self.amp_obs_history_list.append(torch.zeros(self.num_envs, self.cfg.env.num_amp_observations,dtype=torch.float, device=self.device))
         
         for _ in range(self.cfg.env.critic_num_obs_lens):
             self.critic_obs_history.append(torch.zeros(self.num_envs, self.cfg.env.num_critic_single_observations,dtype=torch.float, device=self.device))
@@ -465,7 +476,7 @@ class AmpG1HeightRobot(LeggedRobot):
         if self.discriminator is not None and self.amp_state_normalizer is not None :
             next_state_amp_obs = self.get_amp_observations()
             task_rew = self.rew_buf
-            tot_rew, style_rew = self.discriminator.predict_amp_reward(self.cur_amp_state_obs, next_state_amp_obs, task_rew, self.dt, self.amp_state_normalizer, self.style_reward_normalizer)
+            tot_rew, style_rew = self.discriminator.predict_amp_reward(self.amp_obs_history, next_state_amp_obs, task_rew, self.dt, self.amp_state_normalizer, self.style_reward_normalizer)
             self.episode_sums["task"] += task_rew
             self.episode_sums["style"] += style_rew
             self.rew_buf = tot_rew
@@ -669,6 +680,7 @@ class AmpG1HeightRobot(LeggedRobot):
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
             self._draw_debug_vis()
             self._draw_debug_vis_noise()
+            self._draw_debug_vis_feet()
             if self.cfg.depth.use_camera:
                 window_name = "Depth Image"
                 cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
@@ -851,7 +863,8 @@ class AmpG1HeightRobot(LeggedRobot):
         """
         # If the tracking reward is above 80% of the maximum, increase the range of commands
         if torch.mean(self.episode_sums["tracking_lin_vel"][env_ids]) / self.max_episode_length > 0.8 * self.reward_scales["tracking_lin_vel"]:
-            self.command_ranges["lin_vel_x"][1] = np.clip(self.command_ranges["lin_vel_x"][1] + 0.5, 0., self.cfg.commands.max_curriculum)
+            self.command_ranges["lin_vel_x"][1] = np.clip(self.command_ranges["lin_vel_x"][1] + 0.2, 0., self.cfg.commands.max_curriculum)
+
 
     def update_reward_curriculum(self, current_iter):
         for i in range(len(self.cfg.rewards.reward_curriculum_schedule)):
@@ -875,6 +888,10 @@ class AmpG1HeightRobot(LeggedRobot):
         else:
             self.commands[env_ids, 2] = torch_rand_float(self.command_ranges["ang_vel_yaw"][0], self.command_ranges["ang_vel_yaw"][1], (len(env_ids), 1), device=self.device).squeeze(1)
 
+        self.commands[self.tilt_start_idx : self.crawl_end_idx + 1, 0].clamp_(-1.0, 1.0)
+        self.commands[self.stairdown_start_idx : self.stairdown_end_idx + 1, 0].clamp_(-1.0, 1.0)
+     
+            
         # small vel and yaw set to zero for idol
         self.commands[env_ids, :2] *= (torch.norm(self.commands[env_ids, :2], dim=1) > 0.2).unsqueeze(1)
         
@@ -946,7 +963,9 @@ class AmpG1HeightRobot(LeggedRobot):
                                     #self.contact_forces[:,self.feet_indices].view(self.num_envs,-1),#2 与真实长度不相符
                                     self.rand_push_force[:,:2],#2
                                     self.friction,#1
-                                    self.feet_height #2 与真实长度不相符
+                                    self.feet_height, #2 与真实长度不相符
+                                    self.left_feet_heights,
+                                    self.right_feet_heights
                                     ),dim=-1)
         
         # add noise if needed
@@ -990,7 +1009,9 @@ class AmpG1HeightRobot(LeggedRobot):
                                     #self.contact_forces[:,self.feet_indices].view(self.num_envs,-1),#2 与真实长度不相符
                                     self.rand_push_force[:,:2],#2
                                     self.friction,#1
-                                    self.feet_height #2 与真实长度不相符
+                                    self.feet_height, #2 与真实长度不相符
+                                    self.left_feet_heights,
+                                    self.right_feet_heights
                                     ),dim=-1)
         # 避免直接修改critic obs history
         critic_obs_history = self.critic_obs_history.copy()
@@ -1125,6 +1146,55 @@ class AmpG1HeightRobot(LeggedRobot):
                 z = heights[j]
                 sphere_pose = gymapi.Transform(gymapi.Vec3(x, y, z), r=None)
                 gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose)
+
+    def _draw_debug_vis_feet(self):
+        """Draw foothold / height sample points around feet for debugging."""
+        if not self.terrain.cfg.measure_heights:
+            return
+
+        self.gym.clear_lines(self.viewer)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
+
+        sphere_geom_l = gymutil.WireframeSphereGeometry(0.02, 4, 4, None, color=(0, 1, 0))  # 左脚 绿
+        sphere_geom_r = gymutil.WireframeSphereGeometry(0.02, 4, 4, None, color=(1, 0, 0))  # 右脚 红
+
+        # 假设你在 step 里已经算过：self.left_feet_heights, self.right_feet_heights
+        # 形状应该是 (num_envs, num_foot_height_points)
+        # 如果你没存，可以在这里现算一次：self._get_left_feet_heights() ...
+
+        for i in range(self.num_envs):
+            # ---------- 左脚 ----------
+            # 脚的世界位置
+            lf_pos = self.feet_pos[i, 0, :].cpu().numpy()      # (3,)
+            # 脚的 yaw (或完整 quat，看你写的 quat_apply_yaw / quat_apply)
+            lf_quat = self.feet_quat[i, 0, :].repeat(self.num_foot_height_points)
+            # 脚底局部采样点 → 世界系平面坐标
+            lf_pts = quat_apply_yaw(lf_quat, self.feet_height_points[i]).cpu().numpy()
+            # 左脚每个采样点量到的地面高度 (N,)
+            lf_heights = self.left_feet_heights[i].cpu().numpy()  # 你需要在别处先算好这一项
+
+            for j in range(self.num_foot_height_points):
+                x = lf_pts[j, 0] + lf_pos[0]
+                y = lf_pts[j, 1] + lf_pos[1]
+                z = lf_heights[j]     # 注意这里用“脚量到的 z”
+
+                sphere_pose = gymapi.Transform(gymapi.Vec3(x, y, z), r=None)
+                gymutil.draw_lines(sphere_geom_l, self.gym, self.viewer, self.envs[i], sphere_pose)
+
+            # ---------- 右脚 ----------
+            rf_pos = self.feet_pos[i, 1, :].cpu().numpy()
+            rf_quat = self.feet_quat[i, 1, :].repeat(self.num_foot_height_points)
+            rf_pts = quat_apply_yaw(rf_quat, self.feet_height_points[i]).cpu().numpy()
+            rf_heights = self.right_feet_heights[i].cpu().numpy()
+
+            for j in range(self.num_foot_height_points):
+                x = rf_pts[j, 0] + rf_pos[0]
+                y = rf_pts[j, 1] + rf_pos[1]
+                z = rf_heights[j]
+
+                sphere_pose = gymapi.Transform(gymapi.Vec3(x, y, z), r=None)
+                gymutil.draw_lines(sphere_geom_r, self.gym, self.viewer, self.envs[i], sphere_pose)
+
     
 
     # ========================= Height-Scan Noise (per paper) =========================
@@ -1483,6 +1553,43 @@ class AmpG1HeightRobot(LeggedRobot):
     def get_forward_map(self):
         return torch.clip(self.root_states[:, 2].unsqueeze(1) - self.cfg.rewards.base_height_target - self.measured_forward_heights, -1,
                              1.) * self.obs_scales.height_measurements
+    
+    def _init_feet_height_points(self):
+        """根据当前这个 URDF 脚掌的 collision 点生成采样网格"""
+
+        # 1. 根据 URDF 里的四个球碰撞点得到的脚掌 AABB
+        x_min = -0.03   # 左后
+        x_max =  0.1   # 右前
+        y_min = -0.01   # 里
+        y_max =  0.01   # 外
+
+        # 给一点冗余，覆盖到球的半径 0.005，免得踩边测不到
+        margin = 0.005
+        x_min -= margin
+        x_max += margin
+        y_min -= margin
+        y_max += margin
+
+        # 2. 按你原来的密度来：x 5 点，y 3 点
+        x = torch.linspace(x_min, x_max, steps=5, device=self.device)
+        y = torch.linspace(y_min, y_max, steps=2, device=self.device)
+
+        # 注意：旧版是 meshgrid(x, y)，PyTorch 2 推荐写 indexing='ij'
+        grid_x, grid_y = torch.meshgrid(x, y, indexing='ij')
+        # 这样 grid_x.shape = (5,3), grid_y.shape = (5,3)
+
+        self.num_foot_height_points = grid_x.numel()
+        points = torch.zeros(self.num_envs,
+                            self.num_foot_height_points,
+                            3,
+                            device=self.device)
+
+        points[:, :, 0] = grid_x.flatten()   # x
+        points[:, :, 1] = grid_y.flatten()   # y
+        # z 留 0，就跟你原来的逻辑一样，真正用的时候会加到脚的世界坐标上
+
+        return points
+
 
 #--------------------------------------------------------------------------------------------------------------------------------
     def _reward_lin_vel_z(self):
@@ -1718,3 +1825,55 @@ class AmpG1HeightRobot(LeggedRobot):
         # edge_reward = torch.zeros_like(rew)
         # edge_reward[self.gap_start_idx:self.pit_end_idx] = rew[self.gap_start_idx:self.pit_end_idx]
         return rew
+    
+
+    def _reward_foothold(self):
+        """
+        惩罚“脚踩在安全区域边缘”：
+        - 只对真正接触的脚生效（contact > 2）
+        - 一只脚内部，拿这只脚的采样点最大高度当作“安全高度”
+        - 比它低很多的采样点视为“踩在梁外/石块外”
+        - 按低点的比例来罚
+        """
+        # 1) 脚接触状态: [B, 2] -> [B]左脚, [B]右脚
+        contact = self.contact_forces[:, self.feet_indices, 2] > 1   # bool, [B,2]
+        left_contact  = contact[:, 0]
+        right_contact = contact[:, 1]
+
+        # 2) 脚下量到的地形高度: [B, P]
+        left_h  = self.left_feet_heights
+        right_h = self.right_feet_heights
+
+        # 3) 噪声缓冲，地形本身有高斯噪声/插值噪声，不要太敏感
+        # 可以放到 cfg.rewards.foothold_eps 里
+        eps = getattr(self.cfg.rewards, "foothold_eps", 0.05)   # 1 cm
+
+        # ---------------- 左脚 ----------------
+        # 这一时刻左脚所有采样点里“最高”的那个点，视为真正踩在梁/石块上的高度
+        left_max, _ = left_h.max(dim=1, keepdim=True)          # [B,1]
+        # 哪些点明显比这个安全高度低
+        left_bad_mask = (left_max - left_h) > eps              # [B,P] bool
+        # 这一只脚坏点个数
+        left_bad_cnt = left_bad_mask.float().sum(dim=1)        # [B]
+        # 按比例算（不同采样密度量级不乱）
+        left_bad_ratio = left_bad_cnt / left_h.shape[1]        # [B]
+        # 没接触就不罚
+        left_bad_ratio = left_bad_ratio * left_contact.float() # [B]
+
+        # ---------------- 右脚 ----------------
+        right_max, _ = right_h.max(dim=1, keepdim=True)
+        right_bad_mask = (right_max - right_h) > eps
+        right_bad_cnt = right_bad_mask.float().sum(dim=1)
+        right_bad_ratio = right_bad_cnt / right_h.shape[1]
+        right_bad_ratio = right_bad_ratio * right_contact.float()
+
+        # 4) 合起来就是整条腿的 foohold 惩罚
+        foothold_penalty = left_bad_ratio + right_bad_ratio    # [B]
+
+        r = torch.zeros_like(foothold_penalty)
+        r[self.slope_end_idx:] = foothold_penalty[self.slope_end_idx:]
+      
+        # print(f"foothold_penalty: {r[5].item():.4f}")
+
+    
+        return r
