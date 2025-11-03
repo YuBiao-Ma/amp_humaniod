@@ -23,7 +23,7 @@ from humanoidGym.utils.isaacgym_utils import get_euler_xyz as get_euler_xyz_in_t
 import cv2
 import time as pytime
 
-class AmpG1HeightRobot(LeggedRobot):
+class AmpG1HeightMcRobot(LeggedRobot):
     
     def __init__(self, cfg: LeggedRobotCfg, sim_params, physics_engine, sim_device, headless):
         """ Parses the provided config file,
@@ -77,6 +77,10 @@ class AmpG1HeightRobot(LeggedRobot):
 
         self.global_counter = 0
         self.total_env_steps_counter = 0
+
+        self.task_rew_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
+        self.dis_rew_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
+        self.style_rew_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
 
  
 

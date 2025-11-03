@@ -1185,7 +1185,7 @@ class LeggedRobot(BaseTask):
         heights = heights.view(self.num_envs, -1) * self.terrain.cfg.vertical_scale
 
         feet_height =  self.feet_pos[:, 0, 2].view(self.num_envs,-1) - heights
-        return feet_height
+        return heights
     
     def _get_right_feet_heights(self,env_ids=None):
       
@@ -1215,7 +1215,7 @@ class LeggedRobot(BaseTask):
         heights = heights.view(self.num_envs, -1) * self.terrain.cfg.vertical_scale
         feet_height =  self.feet_pos[:, 1, 2].view(self.num_envs,-1) - heights
 
-        return feet_height
+        return heights
 
     #------------ reward functions----------------
     def _reward_lin_vel_z(self):

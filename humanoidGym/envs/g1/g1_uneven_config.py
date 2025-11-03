@@ -273,9 +273,10 @@ class G1UnevenAmpCfg( LeggedRobotCfg ):
         soft_torque_limit = 0.8
         base_height_target = 0.78
         max_contact_force = 500
+        foothold_eps = 0.1
         reward_curriculum = True
-        reward_curriculum_term = ["feet_edge"]
-        reward_curriculum_schedule = [[4000, 10000, 0.1, 1.0]]
+        reward_curriculum_term = ["feet_edge","yaw_error_when_rate_matches","foothold"]
+        reward_curriculum_schedule = [[1000, 4000, 0.1, 1.0],[4000, 10000, 0.3, 1.0],[4000, 10000, 0.1, 5.0]]
         # only_positive_rewards = False
         class scales( LeggedRobotCfg.rewards.scales ):
             tracking_lin_vel = 3.0
@@ -298,16 +299,19 @@ class G1UnevenAmpCfg( LeggedRobotCfg ):
             ankle_roll_energy = 0.1
             # ankle_action_pitch = -0.05
             # ankle_action_roll = -0.1    
-            yaw_error_when_rate_matches = -0.1
-            stumble = -5.0
+            yaw_error_when_rate_matches = -1
+            # lin_error_when_command = -10
+            stumble = -1.0
             # termination = -10
                 
             dof_vel_limits = -0.1
             dof_pos_limits = -10.
             dof_torque_limits = -1
 
-            feet_edge = -0.5
+            feet_edge = -3
             cheat = -0.5
+
+            foothold = -1
      
                 
             dof_vel_limits = -0.1

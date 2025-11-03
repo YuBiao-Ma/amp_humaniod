@@ -180,16 +180,16 @@ class AmpG1ImageRobot(LeggedRobot):
         self.envs = []
         self.cam_handles = []
 
-        # if(self.cfg.depth.use_camera):
-        #     # All robots of Tilt and Crawl needs depth camera
-        #     self.cfg.depth.camera_num_envs = min(self.cfg.depth.camera_num_envs, self.num_envs)
-        #     self.depth_index_without_crawl_tilt = np.random.choice(range(self.tilt_start_idx), self.cfg.depth.camera_num_envs
-        #                                                      - (self.crawl_end_idx - self.tilt_start_idx), replace=False)
-        #     self.depth_index_without_crawl_tilt = np.sort(self.depth_index_without_crawl_tilt).astype(np.int)
-        #     self.depth_index = np.concatenate((self.depth_index_without_crawl_tilt, range(self.tilt_start_idx, self.crawl_end_idx))).astype(np.int)
-        #     self.depth_index_inverse = -np.ones(self.num_envs, dtype=np.int)
-        #     for i in range(len(self.depth_index)):
-        #         self.depth_index_inverse[self.depth_index[i]] = i
+        if(self.cfg.depth.use_camera):
+            # All robots of Tilt and Crawl needs depth camera
+            self.cfg.depth.camera_num_envs = min(self.cfg.depth.camera_num_envs, self.num_envs)
+            self.depth_index_without_crawl_tilt = np.random.choice(range(self.tilt_start_idx), self.cfg.depth.camera_num_envs
+                                                             - (self.crawl_end_idx - self.tilt_start_idx), replace=False)
+            self.depth_index_without_crawl_tilt = np.sort(self.depth_index_without_crawl_tilt).astype(np.int)
+            self.depth_index = np.concatenate((self.depth_index_without_crawl_tilt, range(self.tilt_start_idx, self.crawl_end_idx))).astype(np.int)
+            self.depth_index_inverse = -np.ones(self.num_envs, dtype=np.int)
+            for i in range(len(self.depth_index)):
+                self.depth_index_inverse[self.depth_index[i]] = i
 
         if self.cfg.depth.use_camera:
             # 1) 相机 env 数量裁剪到 [0, num_envs]
@@ -1139,6 +1139,43 @@ class AmpG1ImageRobot(LeggedRobot):
     def get_forward_map(self):
         return torch.clip(self.root_states[:, 2].unsqueeze(1) - self.cfg.rewards.base_height_target - self.measured_forward_heights, -1,
                              1.) * self.obs_scales.height_measurements
+    
+
+    def _init_feet_height_points(self):
+        """根据当前这个 URDF 脚掌的 collision 点生成采样网格"""
+
+        # 1. 根据 URDF 里的四个球碰撞点得到的脚掌 AABB
+        x_min = -0.05   # 左后
+        x_max =  0.12   # 右前
+        y_min = -0.01   # 里
+        y_max =  0.01   # 外
+
+        # 给一点冗余，覆盖到球的半径 0.005，免得踩边测不到
+        margin = 0.005
+        x_min -= margin
+        x_max += margin
+        y_min -= margin
+        y_max += margin
+
+        # 2. 按你原来的密度来：x 5 点，y 3 点
+        x = torch.linspace(x_min, x_max, steps=10, device=self.device)
+        y = torch.linspace(y_min, y_max, steps=5, device=self.device)
+
+        # 注意：旧版是 meshgrid(x, y)，PyTorch 2 推荐写 indexing='ij'
+        grid_x, grid_y = torch.meshgrid(x, y, indexing='ij')
+        # 这样 grid_x.shape = (5,3), grid_y.shape = (5,3)
+
+        self.num_foot_height_points = grid_x.numel()
+        points = torch.zeros(self.num_envs,
+                            self.num_foot_height_points,
+                            3,
+                            device=self.device)
+
+        points[:, :, 0] = grid_x.flatten()   # x
+        points[:, :, 1] = grid_y.flatten()   # y
+        # z 留 0，就跟你原来的逻辑一样，真正用的时候会加到脚的世界坐标上
+
+        return points
 
 #--------------------------------------------------------------------------------------------------------------------------------
     def _reward_lin_vel_z(self):
@@ -1374,3 +1411,51 @@ class AmpG1ImageRobot(LeggedRobot):
         edge_reward = torch.zeros_like(rew)
         edge_reward[self.gap_start_idx:self.pit_end_idx] = rew[self.gap_start_idx:self.pit_end_idx]
         return edge_reward
+    
+
+    def _reward_foothold(self):
+        """
+        惩罚“脚踩在安全区域边缘”：
+        - 只对真正接触的脚生效（contact > 2）
+        - 一只脚内部，拿这只脚的采样点最大高度当作“安全高度”
+        - 比它低很多的采样点视为“踩在梁外/石块外”
+        - 按低点的比例来罚
+        """
+        # 1) 脚接触状态: [B, 2] -> [B]左脚, [B]右脚
+        contact = self.contact_forces[:, self.feet_indices, 2] > 2.0   # bool, [B,2]
+        left_contact  = contact[:, 0]
+        right_contact = contact[:, 1]
+
+        # 2) 脚下量到的地形高度: [B, P]
+        left_h  = self.left_feet_heights
+        right_h = self.right_feet_heights
+
+        # 3) 噪声缓冲，地形本身有高斯噪声/插值噪声，不要太敏感
+        # 可以放到 cfg.rewards.foothold_eps 里
+        eps = getattr(self.cfg.rewards, "foothold_eps", 0.05)   # 1 cm
+
+        # ---------------- 左脚 ----------------
+        # 这一时刻左脚所有采样点里“最高”的那个点，视为真正踩在梁/石块上的高度
+        left_max, _ = left_h.max(dim=1, keepdim=True)          # [B,1]
+        # 哪些点明显比这个安全高度低
+        left_bad_mask = (left_max - left_h) > eps              # [B,P] bool
+        # 这一只脚坏点个数
+        left_bad_cnt = left_bad_mask.float().sum(dim=1)        # [B]
+        # 按比例算（不同采样密度量级不乱）
+        left_bad_ratio = left_bad_cnt / left_h.shape[1]        # [B]
+        # 没接触就不罚
+        left_bad_ratio = left_bad_ratio * left_contact.float() # [B]
+
+        # ---------------- 右脚 ----------------
+        right_max, _ = right_h.max(dim=1, keepdim=True)
+        right_bad_mask = (right_max - right_h) > eps
+        right_bad_cnt = right_bad_mask.float().sum(dim=1)
+        right_bad_ratio = right_bad_cnt / right_h.shape[1]
+        right_bad_ratio = right_bad_ratio * right_contact.float()
+
+        # 4) 合起来就是整条腿的 foohold 惩罚
+        foothold_penalty = left_bad_ratio + right_bad_ratio    # [B]
+
+      
+        # print(f"foothold_penalty: {foothold_penalty[0].item():.4f}")
+        return foothold_penalty

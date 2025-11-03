@@ -13566,6 +13566,9 @@ class RnnTerrianHeight_V2Actor(nn.Module):
         - VQ-VAE 重建损失 rec_loss
         """
         obs_batch, critic_obs_batch, next_critic_obs_batch, hid_e_batch, masks_batch = subtask_data
+
+        obs_unpad_batch = unpad_trajectories(obs_batch,masks_batch)
+        height_noise = obs_unpad_batch[...,:self.num_height].reshape(-1,self.num_height).contiguous()
         
         # target velocity from critic_obs
         critic_obs_unpad_batch = unpad_trajectories(critic_obs_batch,masks_batch)
@@ -13582,7 +13585,7 @@ class RnnTerrianHeight_V2Actor(nn.Module):
         recon,quantize,z,onehot_encode = self.Vae(height)
         rec_loss = self.Vae.loss_fn(height,recon,quantize,z,onehot_encode)
         
-        predicted_terrian_latent_e = self.predict_terrian_layer_e(height).squeeze(0)  # [N,16]
+        predicted_terrian_latent_e = self.predict_terrian_layer_e(height_noise).squeeze(0)  # [N,16]
 
         # token分类监督
         predicted_onehot_encode = self.predict_onehot_layer(predicted_terrian_latent).reshape(-1,128).contiguous()

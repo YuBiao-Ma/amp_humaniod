@@ -412,7 +412,13 @@ class AmpOnPolicyRunner:
         torch.save(saved_dict, path)
 
     def load(self, path: str, load_optimizer: bool = True):
-        loaded_dict = torch.load(path, weights_only=False)
+
+       
+        loaded_dict = torch.load(
+            path,
+            map_location=self.device
+        )
+        # loaded_dict = torch.load(path, weights_only=False)
         # -- Load PPO model
         self.alg.actor_critic.load_state_dict(loaded_dict["model_state_dict"])
         # -- Load AMP related

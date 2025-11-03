@@ -22,7 +22,7 @@ DAMPING_7520_14 = 2.0 * DAMPING_RATIO * ARMATURE_7520_14 * NATURAL_FREQ #2.5577
 DAMPING_7520_22 = 2.0 * DAMPING_RATIO * ARMATURE_7520_22 * NATURAL_FREQ #6.3083
 DAMPING_4010 = 2.0 * DAMPING_RATIO * ARMATURE_4010 * NATURAL_FREQ #1.0681
 
-class G1HeightAmpCfg( LeggedRobotCfg ):
+class G1HeightMcAmpCfg( LeggedRobotCfg ):
     class init_state( LeggedRobotCfg.init_state ):
         pos = [0, 0, 0.80] # x,y,z [m]
         orn = [0.0, 0.0, 0.0, 1.0]
@@ -292,44 +292,41 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
         reward_curriculum_schedule = [[1000, 4000, 0.1, 1.0],[4000, 10000, 0.3, 1.0],[4000, 10000, 0.1, 5.0]]
         # only_positive_rewards = False
         class scales( LeggedRobotCfg.rewards.scales ):
-            tracking_lin_vel = 3.0
-            tracking_ang_vel = 1.5
-            base_acc = 0.2
+            task_tracking_lin_vel = 3.0
+            task_tracking_ang_vel = 1.5
+            task_base_acc = 0.2
             #alive = 0.05
             
             #正则化
-            stand_still = -1
+            task_stand_still = -1
             # action_rate = -0.01
-            action_smooth = -0.01
-            foot_slip = -0.1
-            feet_contact_forces = 0.01
+            task_action_smooth = -0.01
+            task_foot_slip = -0.1
+            task_feet_contact_forces = 0.01
             # exp_energy = 0.05
-            power_dist = -2e-5
-            torques = -0.00001
-            dof_vel = -1e-4
-            dof_acc = -2.5e-7
-            ankle_pitch_energy = 0.1
-            ankle_roll_energy = 0.1
+            task_power_dist = -2e-5
+            task_torques = -0.00001
+            task_dof_vel = -1e-4
+            task_dof_acc = -2.5e-7
+            task_ankle_pitch_energy = 0.1
+            task_ankle_roll_energy = 0.1
             # ankle_action_pitch = -0.05
             # ankle_action_roll = -0.1    
-            yaw_error_when_rate_matches = -1
+            task_yaw_error_when_rate_matches = -1
             # lin_error_when_command = -10
-            stumble = -1.0
+            task_dof_vel_limits = -0.1
+            task_dof_pos_limits = -10.
+            task_dof_torque_limits = -1
+            task_dof_vel_limits = -0.1
+            task_dof_pos_limits = -10.
+            task_dof_torque_limits = -1
+
+            dis_stumble = -1.0
             # termination = -10
-                
-            dof_vel_limits = -0.1
-            dof_pos_limits = -10.
-            dof_torque_limits = -1
+            dis_feet_edge = -3
+            dis_cheat = -0.5
 
-            feet_edge = -3
-            cheat = -0.5
-
-            foothold = -3
-     
-                
-            dof_vel_limits = -0.1
-            dof_pos_limits = -10.
-            dof_torque_limits = -1
+            dis_foothold = -3
             
     class sim:
         dt =  0.005
@@ -350,7 +347,7 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
             default_buffer_size_multiplier = 5
             contact_collection = 2 # 0: never, 1: last sub-step, 2: all sub-steps (default=2)
 
-class G1HeightAmpCfgPPO( LeggedRobotCfgPPO ):
+class G1HeightMcAmpCfgPPO( LeggedRobotCfgPPO ):
     runner_class_name = 'AmpOnPolicyRunner'
     class policy:
         init_noise_std = 0.8
@@ -420,3 +417,6 @@ class G1HeightAmpCfgPPO( LeggedRobotCfgPPO ):
         amp_num_preload_transitions = 2000000
         normalize_style_reward = True
         
+
+
+  
