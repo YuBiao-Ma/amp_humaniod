@@ -38,6 +38,9 @@
                 //   "--checkpoint=13000",
                 "--rl_device=cpu",
                 "--sim_device=cpu",
+                "--load_run=server_v2",
+                //  "--num_envs", "16",
+                //   "--checkpoint=13000",
 
               
             ]
