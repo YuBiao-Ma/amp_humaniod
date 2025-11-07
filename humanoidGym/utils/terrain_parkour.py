@@ -204,7 +204,7 @@ class TerrainParkour:
                                            horizontal_scale=self.cfg.horizontal_scale)
         amplitude = 0.1 + 0.2 * difficulty
         slope = difficulty * 0.8 + 0.1
-        step_height = 0.05 + 0.3 * difficulty
+        step_height = 0.05 + 0.2 * difficulty
         discrete_obstacles_height = 0.05 + difficulty * 0.5
         stepping_stones_size = 1.5 * (1.05 - difficulty)
         stone_distance = 0.05 if difficulty == 0 else 0.1
@@ -222,9 +222,15 @@ class TerrainParkour:
             terrain_utils.pyramid_sloped_terrain(terrain, slope=slope, platform_size=3.)
             terrain_utils.random_uniform_terrain(terrain, min_height=-0.05, max_height=0.05, step=0.005,
                                                  downsampled_scale=0.2)
+            
+        elif choice < self.proportions[2]:
+            
+            step_height *= -1
+            terrain_utils.pyramid_stairs_terrain(terrain, step_width=stair_step_width, step_height=step_height,
+                                                 platform_size=1.)
+            
         elif choice < self.proportions[3]:
-            if choice < self.proportions[2]:
-                step_height *= -1
+           
             pyramid_stairs_terrain(terrain, step_width=stair_step_width, step_height=step_height,
                                                  platform_size=1.)
             # terrain_utils.random_uniform_terrain(terrain, min_height=-0.05, max_height=0.05, step=0.005,
@@ -247,12 +253,56 @@ class TerrainParkour:
                                                  downsampled_scale=0.2)
 
         elif choice < self.proportions[7]:
-            discrete_blocks_terrain(terrain, difficulty,
-                            corridor_w=2, margin=0.0,
-                            size_easy=0.9, size_hard=0.25,
-                            gap_easy=0.05,  gap_hard=0.15,
-                            h_easy=10,    h_hard=10,
-                            stagger=True, p_drop=0.0)
+            # discrete_blocks_terrain(terrain, difficulty,
+            #                 corridor_w=2, margin=0.0,
+            #                 size_easy=0.9, size_hard=0.25,
+            #                 gap_easy=0.05,  gap_hard=0.15,
+            #                 h_easy=10,    h_hard=10,
+            #                 stagger=True, p_drop=0.0)
+            
+            crawl_height = 1.1 - 0.16 * difficulty
+            env_origin_x = (i + 0.5) * self.env_length
+            env_origin_y = (j + 0.5) * self.env_width
+            box_x = 0.1 + 0.1 * np.random.random()
+            box_z = 0.1 + 0.1 * np.random.random()
+            front_upper_bar_trimesh = trimesh.box_trimesh(
+                np.array([
+                    box_x,
+                    self.env_width,
+                    box_z
+                ], dtype=np.float32),
+                np.array([
+                    env_origin_x +  self.cfg.border_size + 2 + box_x / 2,
+                    env_origin_y + self.cfg.border_size,
+                    crawl_height + box_z/2,
+                ], dtype=np.float32),
+            )
+            if self.added_trimesh is None:
+                self.added_trimesh = front_upper_bar_trimesh
+            else:
+                self.added_trimesh = trimesh.combine_trimeshes(
+                self.added_trimesh,
+                front_upper_bar_trimesh,
+            )
+            back_upper_bar_trimesh = trimesh.box_trimesh(
+                np.array([
+                    box_x,
+                    self.env_width,
+                    box_z
+                ], dtype=np.float32),
+                np.array([
+                    env_origin_x +  self.cfg.border_size + 2 + box_x / 2,
+                    env_origin_y + self.cfg.border_size,
+                    crawl_height + box_z/2,
+                ], dtype=np.float32),
+            )
+            if self.added_trimesh is None:
+                self.added_trimesh = back_upper_bar_trimesh
+            else:
+                self.added_trimesh = trimesh.combine_trimeshes(
+                self.added_trimesh,
+                back_upper_bar_trimesh,
+            )
             # num_rectangles = 20
             # rectangle_min_size = 1.
             # rectangle_max_size = 2.
@@ -260,6 +310,7 @@ class TerrainParkour:
             #                                          rectangle_max_size, num_rectangles, platform_size=3.)
             terrain_utils.random_uniform_terrain(terrain, min_height=-0.05, max_height=0.05, step=0.005,
                                                  downsampled_scale=0.2)
+            
 
 
 

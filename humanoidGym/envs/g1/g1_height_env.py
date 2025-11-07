@@ -879,7 +879,7 @@ class AmpG1HeightRobot(LeggedRobot):
             self.commands[env_ids, 2] = torch_rand_float(self.command_ranges["ang_vel_yaw"][0], self.command_ranges["ang_vel_yaw"][1], (len(env_ids), 1), device=self.device).squeeze(1)
 
         self.commands[self.tilt_start_idx : self.crawl_end_idx + 1, 0].clamp_(-1.0, 1.0)
-        self.commands[self.stairdown_start_idx : self.stairdown_end_idx + 1, 0].clamp_(-1.0, 1.0)
+        self.commands[self.stairup_start_idx : self.stairdown_end_idx + 1, 0].clamp_(-1.0, 1.0)
      
             
         # small vel and yaw set to zero for idol

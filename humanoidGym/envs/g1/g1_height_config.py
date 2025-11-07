@@ -152,7 +152,8 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
         num_rows = 10  # number of terrain rows (levels)
         num_cols = 20  # number of terrain cols (types)
         # terrain types: [wave, rough slope, stairs up, stairs down, discrete, gap, pit, tilt, crawl, rough_flat]
-        terrain_proportions = [0.0, 0.15, 0.0, 0.25, 0.0, 0.15, 0.25, 0.25, 0.05, 0.00]
+        terrain_proportions = [0.0, 0.05, 0.15, 0.15, 0.0, 0.25, 0.25, 0.0, 0.1, 0.00]
+        # terrain_proportions = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.7, 0.0, 0.00]
         # terrain_proportions = [0, 1.0, 0.0, 0, 0, 0, 0, 0, 0]
         # trimesh only:
         slope_treshold = 0.75  # slopes above this threshold will be corrected to vertical surfaces
@@ -288,8 +289,8 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
         max_contact_force = 500
         foothold_eps = 0.05
         reward_curriculum = True
-        reward_curriculum_term = ["feet_edge","yaw_error_when_rate_matches","foothold"]
-        reward_curriculum_schedule = [[1000, 4000, 0.1, 1.0],[4000, 10000, 0.3, 1.0],[4000, 10000, 0.1, 5.0]]
+        reward_curriculum_term = ["feet_edge","yaw_error_when_rate_matches",]
+        reward_curriculum_schedule = [[1000, 4000, 0.1, 1.0],[4000, 10000, 0.3, 3.0]]
         # only_positive_rewards = False
         class scales( LeggedRobotCfg.rewards.scales ):
             tracking_lin_vel = 3.0
@@ -324,7 +325,7 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
             feet_edge = -3
             cheat = -0.5
 
-            foothold = -3
+            foothold = 0
      
                 
             dof_vel_limits = -0.1
