@@ -15,9 +15,8 @@
                 // "--headless",
                 // "--load_run=Oct26_12-02-21_vaild_g1_amp",
                 // "--resume"
-                "--run_name=all117",
-                "--rl_device=cuda:1",
-                "--sim_device=cuda:1"
+                "--run_name=allv3_11-7",
+             
               
             ]
         },

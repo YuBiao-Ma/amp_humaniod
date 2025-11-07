@@ -974,6 +974,16 @@ class AmpG1HeightRobot(LeggedRobot):
         if self.cfg.terrain.measure_heights:
             heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
             heights_noise = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights_noise, -1, 1.) * self.obs_scales.height_measurements
+            
+            env_range = torch.arange(self.wave_start_idx, self.stairdown_end_idx + 1, device=self.device)
+            # 随机选取一定比例的 env
+            drop_ratio = 0.3  # can be tuned
+            num_to_drop = int(env_range.numel() * drop_ratio)
+            # 随机打乱后取前 num_to_drop 个
+            perm = env_range[torch.randperm(env_range.numel(), device=self.device)[:num_to_drop]]
+            # 对这些 env，把整行的高度噪声清零
+            heights_noise[perm, :] = 0.0
+
             privileged_obs_buf = torch.cat((heights,critic_obs_history), dim=-1)
             self.obs_buf = torch.cat([heights_noise,self.obs_buf],dim=-1)
         else:
