@@ -13717,7 +13717,7 @@ class RnnTerrianHeight_V3Actor(nn.Module):
         
        
         self.switch_beta = 10   # 阈值，rec_loss 小于它视为“height可靠”，你自己调
-        self.switch_gamma = 0.1   # 低通滤波系数，越小越平滑
+        self.switch_gamma = 1   # 低通滤波系数，越小越平滑
         self.register_buffer("prev_P", torch.tensor(1.0))
         self.random = 1
         
