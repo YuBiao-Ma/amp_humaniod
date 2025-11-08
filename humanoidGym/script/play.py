@@ -46,7 +46,7 @@ def play(args):
     env_cfg.env.episode_length_s = 200
     
     env_cfg.height_noise.hsn_curriculum = False
-    env_cfg.height_noise.hsn_scenario_probs = [1.0, 0.0, 0.0]
+    env_cfg.height_noise.hsn_scenario_probs = [0.0, 0.0, 1.0]
     # env_cfg.terrain.terrain_proportions = {
     #     'slope': [0, 1.0, 0.0, 0, 0, 0, 0, 0, 0],
     #     'stair': [0, 0, 0, 1, 0, 0, 0, 0, 0],
