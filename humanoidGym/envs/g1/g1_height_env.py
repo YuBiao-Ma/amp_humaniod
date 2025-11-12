@@ -378,6 +378,8 @@ class AmpG1HeightRobot(LeggedRobot):
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
         self.rand_push_force = torch.zeros((self.num_envs, 3), dtype=torch.float32, device=self.device)
         self.phase_length_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
+        self.terrain_ids = torch.zeros((self.num_envs, 1), dtype=torch.float32, device=self.device)
+        self.flip_flag = torch.zeros((self.num_envs, 1), dtype=torch.float32, device=self.device)
         
         if self.cfg.terrain.measure_heights:
             self.height_points = self._init_height_points()
@@ -932,14 +934,21 @@ class AmpG1HeightRobot(LeggedRobot):
     
     def compute_observations(self):
         """ Computes observations
-        """    
+        """
+        self.terrain_ids[self.wave_start_idx:self.stairdown_end_idx] = 1
+        self.terrain_ids[self.roughflat_start_idx:self.roughflat_end_idx] = 1
+        if (self.global_counter -1 ) % (20*24) == 0:
+            self.flip_flag[self.wave_start_idx:self.stairdown_end_idx] = 1 - self.flip_flag[self.wave_start_idx:self.stairdown_end_idx]
+            self.flip_flag[self.roughflat_start_idx:self.roughflat_end_idx] = 1 - self.flip_flag[self.roughflat_start_idx:self.roughflat_end_idx]
         single_obs = torch.cat((
                             self.commands[:, :3] * self.commands_scale,
                             self.base_ang_vel  * self.obs_scales.ang_vel,
                             self.projected_gravity,
                             (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
                             self.dof_vel * self.obs_scales.dof_vel,
-                            self.actions
+                            self.actions,
+                            self.terrain_ids,
+                            self.flip_flag
                             ),dim=-1)
         
         single_privileged_obs = torch.cat((
@@ -1443,7 +1452,7 @@ class AmpG1HeightRobot(LeggedRobot):
             env_range = torch.arange(self.wave_start_idx,
                                     self.stairdown_end_idx + 1,
                                     device=self.device)
-            drop_ratio = 0.5
+            drop_ratio = 0.0
             num_to_drop = int(env_range.numel() * drop_ratio)
 
             # 先做一个全False的mask

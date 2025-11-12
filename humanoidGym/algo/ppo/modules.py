@@ -13618,7 +13618,7 @@ class RnnTerrianHeight_V3Actor(nn.Module):
         # 尺寸/结构超参
         # ---------------------
         self.num_height = 187                 # 高度扫描长度
-        self.num_prop = num_prop - self.num_height
+        self.num_prop = num_prop - self.num_height -2
         self.num_height_encode = 128          # codebook大小 / one-hot长度
         self.num_priv = 5
 
@@ -13628,6 +13628,7 @@ class RnnTerrianHeight_V3Actor(nn.Module):
         self.rnn_type = rnn_type
         self.rnn_num_layers = rnn_num_layers
         self.rnn_num_hidden = rnn_num_hidden 
+        self.iter = 0
         
         # ---------------------
         # Actor head
@@ -13716,8 +13717,8 @@ class RnnTerrianHeight_V3Actor(nn.Module):
         )
         
        
-        self.switch_beta = 10   # 阈值，rec_loss 小于它视为“height可靠”，你自己调
-        self.switch_gamma = 1   # 低通滤波系数，越小越平滑
+        self.switch_beta = 1  # 阈值，rec_loss 小于它视为“height可靠”，你自己调
+        self.switch_gamma = 0.2   # 低通滤波系数，越小越平滑
         self.register_buffer("prev_P", torch.tensor(1.0))
         self.random = 1
         
@@ -13725,110 +13726,83 @@ class RnnTerrianHeight_V3Actor(nn.Module):
         self.random = random
         
     
-    def forward(self,observations, masks=None, hidden_states=None):
-        """
-        训练/评估阶段的前向。
-        约定:
-        - 如果 hidden_states 是 tuple(...)，我们认为是 [T,B,...] 版本
-        - 否则是 [B,...] 版本
-        """
-      
+    def forward(self, observations, masks=None, hidden_states=None):
+        
         if hidden_states:
-            # observations: [T,B,D]
+            # observations: [T,B,D]，假设最后两列为 terrain_id 和 terrain_flip_flag
             T, B = observations.shape[0], observations.shape[1]
             with torch.no_grad():
-                prop = observations[:, :, self.num_height:]              # [T,B,num_prop]
+                prop = observations[:, :, self.num_height:-2]              
+                terrain_ids = observations[:, :, -2]  # [T,B]
+                flip_flag   = observations[:, :, -1].bool()  # [T,B]
 
-                # proprio 分支
-                est_encode = self.est_rnn(prop, masks, hidden_states[1], False)   # [T,B,H]
-                predicted_vel = self.predict_vel_layer(est_encode)                # [T,B,3]
-                terr_from_prop = self.predict_terrian_layer(est_encode)           # [T,B,16]
+                if terrain_ids.ndim == 3 and terrain_ids.shape[-1] == 1:
+                    terrain_ids = terrain_ids.squeeze(-1)
+                terrain_ids = terrain_ids.long()  # [T,B]
 
-                # height 分支
-                height = observations[:, :, :self.num_height]    # [T,B,187]
+                est_encode = self.est_rnn(prop, masks, hidden_states[1], False)
+                predicted_vel = self.predict_vel_layer(est_encode)                
+                terr_from_prop = self.predict_terrian_layer(est_encode)   # [T,B,C]
 
-                # ---- 展平成 [T*B, 187] 送进 VAE ----
-                height_flat = height.reshape(T * B, self.num_height).contiguous()     # [TB,187]
-                recon, _, _, _ = self.Vae(height_flat)                                 # recon: [TB,187] 这样就能过
-                # 重建误差也要还原成 [T,B,1]
-                rec_loss_flat = F.mse_loss(recon, height_flat, reduction='none').mean(dim=-1, keepdim=True)  # [TB,1]
-                rec_loss = rec_loss_flat.view(T, B, 1)                                 # [T,B,1]
+                height = observations[:, :, :self.num_height]   
+                terr_from_height = self.predict_terrian_layer_e(height)  # [T,B,C]
 
-                # height → terrain latent 也要同样展平再还原
-                terr_from_height_flat = self.predict_terrian_layer_e(height_flat)      # [TB,16]
-                terr_from_height = terr_from_height_flat.view(T, B, -1)                # [T,B,16]
+            # terrain_id==0 强制 height
+            flip_flag = torch.where(terrain_ids == 0, torch.zeros_like(flip_flag), flip_flag)
 
-                # ---- 每个 env 单独一条滤波器 ----
-                # 如果还没建过 prev_P，或者大小不匹配，就按当前 B 重建
-                if self.prev_P.dim() == 0 or self.prev_P.shape[0] != B:
-                    self.prev_P = torch.ones(B, 1, device=observations.device)
+            # mask: terrain_id==1 且 flip_flag==True 使用 prop
+            use_prop_mask = (terrain_ids == 1) & flip_flag      # [T,B]
+            use_prop_mask = use_prop_mask.unsqueeze(-1)         # [T,B,1]
 
-                # 生开关
-                hat_P_t = (rec_loss < self.switch_beta).float()    # [T,B,1]
+            terrain_sel = torch.where(use_prop_mask, terr_from_prop, terr_from_height)  # [T,B,C]
 
-                # 我们用最后一帧的检测来更新这一批 env 的状态
-                hat_P_last = hat_P_t[-1]                           # [B,1]
+            # 拼接 actor 输入
+            actor_input = torch.cat([
+                                prop,                      # [T,B,num_prop]
+                                predicted_vel.detach(),    # [T,B,vel_dim]
+                                terrain_sel.detach()       # [T,B,terr_dim]
+                            ], dim=-1)                     # [T,B, total_dim]
 
-                P_prev = self.prev_P                               # [B,1]
-                P_t = (1.0 - self.switch_gamma) * P_prev + self.switch_gamma * hat_P_last  # [B,1]
-                self.prev_P = P_t.detach()
-
-                # 把 per-env 的 P_t 扩回所有时间步
-                P_t_all = P_t.unsqueeze(0).expand(T, B, 1)         # [T,B,1]
-
-                # 硬切
-                use_height = (P_t_all > 0.5).float()               # [T,B,1]
-                terrain_sel = use_height * terr_from_height + (1.0 - use_height) * terr_from_prop  # [T,B,16]
-
-            actor_input = torch.cat([prop,
-                                    predicted_vel.detach(),
-                                    terrain_sel.detach()],
-                                    dim=-1)                        # [T,B, num_prop+3+16]
             encode = self.rnn(actor_input, masks, hidden_states[0]).squeeze(0)
             mean = self.actor(encode)
-        
-        
+
         else:
+            # 非时间序列分支：observations: [B,D]，假设最后两列为 terrain_id 和 terrain_flip_flag
             with torch.no_grad():
-                prop = observations[:, self.num_height:]                     # [B, ...]
+                prop = observations[:, self.num_height:-2]                     # [B, ...]
+                terrain_id = observations[:, -2].long()                        # [B]
+                flip_flag  = observations[:, -1].long().bool()                        # [B]
+
                 est_encode = self.est_rnn(prop, masks, hidden_states)
                 est_encode = est_encode.squeeze(0) if est_encode.dim() == 3 else est_encode
-                predicted_vel = self.predict_vel_layer(est_encode)           # [B,3]
+                predicted_vel = self.predict_vel_layer(est_encode)           # [B,vel_dim]
 
-                height = observations[:, :self.num_height]                   # [B,187]
-                recon, _, _, _ = self.Vae(height)
-                rec_loss = F.mse_loss(recon, height, reduction='none').mean(dim=-1, keepdim=True)  # [B,1]
-
-                terr_from_height = self.predict_terrian_layer_e(height)      # [B,16]
-                terr_from_prop   = self.predict_terrian_layer(est_encode)    # [B,16]
-
-                # 保证 prev_P 跟这次 B 一致
-                B = observations.shape[0]
-                if self.prev_P.dim() == 0 or self.prev_P.shape[0] != B:
-                    self.prev_P = torch.ones(B, 1, device=observations.device)
-
-                hat_P_t = (rec_loss < self.switch_beta).float()              # [B,1]
-
-                P_prev = self.prev_P                                         # [B,1]
-                P_t = (1.0 - self.switch_gamma) * P_prev + self.switch_gamma * hat_P_t  # [B,1]
-                self.prev_P = P_t.detach()
-
-                use_height = (P_t > 0.5).float()                             # [B,1]
-                # [B,1] 和 [B,16] 广播，OK
-                terrain_fused = use_height * terr_from_height + (1.0 - use_height) * terr_from_prop
-
+                height = observations[:, :self.num_height]                   # [B,num_height]
          
-            actor_input = torch.cat(
-                [prop,
-                 predicted_vel.detach(),
-                 terrain_fused.detach()],
-                dim=-1
-            )  # [B,num_prop+3+embed_dim]
-            
+                terr_from_height = self.predict_terrian_layer_e(height)      # [B,C]
+                terr_from_prop   = self.predict_terrian_layer(est_encode)    # [B,C]
+
+            # terrain_id==0 强制 height
+            flip_flag = torch.where(terrain_id == 0, torch.zeros_like(flip_flag), flip_flag)
+
+            # mask: terrain_id==1 且 flip_flag==True 使用 prop
+            use_prop_mask = (terrain_id == 1) & flip_flag
+            terrain_sel = torch.where(use_prop_mask.unsqueeze(-1), terr_from_prop, terr_from_height)  # [B,C]
+
+            # 拼接 actor 输入
+            actor_input = torch.cat([
+                            prop,                      # [B,num_prop]
+                            predicted_vel.detach(),    # [B,vel_dim]
+                            terrain_sel.detach()       # [B,terr_dim]
+                        ], dim=-1)
+
             encode = self.rnn(actor_input, masks, hidden_states).squeeze(0)
             mean  = self.actor(encode)
-    
+
+            self.iter += 1
+
         return mean
+
     
     def depoly_forward(self, obs, est_hidden, hidden):
         """
@@ -13836,7 +13810,7 @@ class RnnTerrianHeight_V3Actor(nn.Module):
         - obs: [T,B,...] 或 [1,B,...] (通常是在线控制时的单步/T=1)
         - est_hidden, hidden: RNN隐状态
         """
-        prop = obs[:,:,self.num_height:]
+        prop = obs[:,:,self.num_height:-2]
         size = prop.shape
         
         est_encode, est_next_hidden = self.est_rnn.depoly_inference(prop, est_hidden)
@@ -13906,7 +13880,7 @@ class RnnTerrianHeight_V3Actor(nn.Module):
         critic_obs_unpad_batch = unpad_trajectories(critic_obs_batch,masks_batch)
         cur_vel_target = critic_obs_unpad_batch[...,self.num_height+3:self.num_height+6]
         
-        prop_batch = obs_batch[:,:,self.num_height:]
+        prop_batch = obs_batch[:,:,self.num_height:-2]
         # est hidden
         hidden = self.est_rnn(prop_batch,masks_batch,hid_e_batch)
         predicted_vel = self.predict_vel_layer(hidden).squeeze(0)  # [N,3]
@@ -13928,7 +13902,11 @@ class RnnTerrianHeight_V3Actor(nn.Module):
         cls_loss_e = F.cross_entropy(predicted_onehot_encode_e,target)
         
         mseloss = F.mse_loss(predicted_vel,cur_vel_target.detach())
-        loss = cls_loss + cls_loss_e + mseloss + vq_loss
+
+        mseloss2 = F.mse_loss(predicted_terrian_latent.reshape(-1,16),predicted_terrian_latent_e.detach())
+
+        loss = cls_loss + cls_loss_e + mseloss + vq_loss + mseloss2
+        
         return loss
 
     

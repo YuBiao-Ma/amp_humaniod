@@ -58,7 +58,7 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
         num_envs = 4096
 
         num_height = 187
-        num_single_observations = 72 + num_height
+        num_single_observations = 72 + num_height + 2
         num_critic_single_observations = 80 +20
        
         num_actions = 21
