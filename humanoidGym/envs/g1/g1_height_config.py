@@ -55,7 +55,7 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
         }
     
     class env(LeggedRobotCfg.env):
-        num_envs = 4096
+        num_envs = 5120
 
         num_height = 187
         num_single_observations = 72 + num_height + 2
@@ -152,7 +152,7 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
         num_rows = 10  # number of terrain rows (levels)
         num_cols = 20  # number of terrain cols (types)
         # terrain types: [wave, rough slope, stairs up, stairs down, discrete, gap, pit, tilt, crawl, rough_flat]
-        terrain_proportions = [0.0, 0.05, 0.15, 0.15, 0.0, 0.25, 0.25, 0.0, 0.1, 0.00]
+        terrain_proportions = [0.0, 0.05, 0.25, 0.25, 0.0, 0.15, 0.15, 0.0, 0.0, 0.00]
         # terrain_proportions = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.7, 0.0, 0.00]
         # terrain_proportions = [0, 1.0, 0.0, 0, 0, 0, 0, 0, 0]
         # trimesh only:
@@ -271,7 +271,7 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
     
     class commands:
         curriculum = True
-        max_curriculum = 2.0
+        max_curriculum = 3.0
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         resampling_time = 10. # time before command are changed[s]
         heading_command = True # if true: compute         
@@ -289,8 +289,8 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
         max_contact_force = 500
         foothold_eps = 0.05
         reward_curriculum = True
-        reward_curriculum_term = ["feet_edge","yaw_error_when_rate_matches",]
-        reward_curriculum_schedule = [[1000, 4000, 0.1, 1.0],[4000, 10000, 0.3, 3.0]]
+        reward_curriculum_term = ["feet_edge","yaw_error_when_rate_matches","stumble","collision"]
+        reward_curriculum_schedule = [[1000, 4000, 0.1, 1.0],[4000, 10000, 0.3, 3.0],[1000, 4000, 0.1, 1.0],[1000, 4000, 0.1, 1.0]]
         # only_positive_rewards = False
         class scales( LeggedRobotCfg.rewards.scales ):
             tracking_lin_vel = 3.0
@@ -326,6 +326,8 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
             cheat = -0.5
 
             foothold = 0
+
+            collision = -1
      
                 
             dof_vel_limits = -0.1
@@ -411,7 +413,7 @@ class G1HeightAmpCfgPPO( LeggedRobotCfgPPO ):
         #     mirror_loss_coeff=1
             
     class runner( LeggedRobotCfgPPO.runner ):
-        empirical_normalization = True
+        empirical_normalization = False
         policy_class_name = "ActorCriticRecurrent"
         max_iterations = 30000
         run_name = 'vaild_g1_amp'

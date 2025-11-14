@@ -17,7 +17,7 @@
                 // "--resume"
                 "--rl_device=cuda:0",
                 "--sim_device=cuda:0",
-                "--run_name=allv3_beyond_11-10",
+                "--run_name=allv4_32latent",
              
               
             ]

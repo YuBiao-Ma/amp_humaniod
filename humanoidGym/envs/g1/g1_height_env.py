@@ -317,6 +317,35 @@ class AmpG1HeightRobot(LeggedRobot):
 
     def _init_action_scales(self):        
         self.action_scales = torch.tensor(self.cfg.control.action_scales).to(self.device).unsqueeze(0)
+
+    def _init_terrain_id(self):
+        if 1: #CTS
+            start1, end1 = self.wave_start_idx, self.stairdown_end_idx
+            start2, end2 = self.roughflat_start_idx, self.roughflat_end_idx
+
+            # 构造索引范围
+            idxs1 = torch.arange(start1, end1)
+            idxs2 = torch.arange(start2, end2)
+
+            # 打乱顺序
+            perm1 = idxs1[torch.randperm(len(idxs1))]
+            perm2 = idxs2[torch.randperm(len(idxs2))]
+
+            ratio = 3/4  # or 0.8
+            take1 = perm1[: int(len(perm1) * ratio) ]
+            take2 = perm2[: int(len(perm2) * ratio) ]
+
+            # 合并
+            selected_idxs = torch.cat([take1, take2])
+
+            # 例如给这些索引赋值
+            
+            self.terrain_ids[selected_idxs] = 1
+        else:
+            
+            self.terrain_ids[self.wave_start_idx:self.stairdown_end_idx] = 1
+            self.terrain_ids[self.roughflat_start_idx:self.roughflat_end_idx] = 1
+
         
     def _init_buffers(self):
        
@@ -433,11 +462,13 @@ class AmpG1HeightRobot(LeggedRobot):
         self._init_foot()
         self._init_mirror()
         self._init_action_scales()
+        self._init_terrain_id()
         if self.cfg.depth.use_camera:
             self.depth_buffer = torch.zeros(self.cfg.depth.camera_num_envs,
                                             self.cfg.depth.buffer_len,
                                             self.cfg.depth.resized[0],
                                             self.cfg.depth.resized[1]).to(self.device)
+        
        
     
  
@@ -855,7 +886,7 @@ class AmpG1HeightRobot(LeggedRobot):
         """
         # If the tracking reward is above 80% of the maximum, increase the range of commands
         if torch.mean(self.episode_sums["tracking_lin_vel"][env_ids]) / self.max_episode_length > 0.8 * self.reward_scales["tracking_lin_vel"]:
-            self.command_ranges["lin_vel_x"][1] = np.clip(self.command_ranges["lin_vel_x"][1] + 0.2, 0., self.cfg.commands.max_curriculum)
+            self.command_ranges["lin_vel_x"][1] = np.clip(self.command_ranges["lin_vel_x"][1] + 0.5, 0., self.cfg.commands.max_curriculum)
 
 
     def update_reward_curriculum(self, current_iter):
@@ -935,8 +966,7 @@ class AmpG1HeightRobot(LeggedRobot):
     def compute_observations(self):
         """ Computes observations
         """
-        self.terrain_ids[self.wave_start_idx:self.stairdown_end_idx] = 1
-        self.terrain_ids[self.roughflat_start_idx:self.roughflat_end_idx] = 1
+        
         if (self.global_counter -1 ) % (20*24) == 0:
             self.flip_flag[self.wave_start_idx:self.stairdown_end_idx] = 1 - self.flip_flag[self.wave_start_idx:self.stairdown_end_idx]
             self.flip_flag[self.roughflat_start_idx:self.roughflat_end_idx] = 1 - self.flip_flag[self.roughflat_start_idx:self.roughflat_end_idx]

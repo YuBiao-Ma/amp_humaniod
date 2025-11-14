@@ -7680,7 +7680,7 @@ class PureVqvaeEMA(nn.Module):
 
     def __init__(self,
                  in_dim= 45,
-                 latent_dim = 16,
+                 latent_dim = 32,
                  encoder_hidden_dims = [64,32],
                  decoder_hidden_dims = [32,64],
                  output_dim = 45,
@@ -13903,14 +13903,320 @@ class RnnTerrianHeight_V3Actor(nn.Module):
         
         mseloss = F.mse_loss(predicted_vel,cur_vel_target.detach())
 
-        mseloss2 = F.mse_loss(predicted_terrian_latent.reshape(-1,16),predicted_terrian_latent_e.detach())
+        # mseloss2 = F.mse_loss(predicted_terrian_latent.reshape(-1,16),predicted_terrian_latent_e.detach())
 
-        loss = cls_loss + cls_loss_e + mseloss + vq_loss + mseloss2
+        loss = cls_loss_e + mseloss + vq_loss + cls_loss
         
         return loss
 
     
 
+class RnnTerrianHeight_V4Actor(nn.Module):
+    def __init__(self,
+                 num_prop,
+                 actor_dims,
+                 num_actions,
+                 activation,
+                 rnn_num_hidden,
+                 rnn_type='gru',
+                 rnn_num_layers=1,
+                 embed_dim=32   # <--- 新增：地形embedding的维度
+                 ) -> None:
+        
+        super().__init__()  # 修正super
+        
+        # ---------------------
+        # 尺寸/结构超参
+        # ---------------------
+        self.num_height = 187                 # 高度扫描长度
+        self.num_prop = num_prop - self.num_height -2
+        self.num_height_encode = 128          # codebook大小 / one-hot长度
+        self.num_priv = 5
+
+        self.embed_dim = embed_dim            # 地形embedding维度 (替换原来的 z 维度)
+        self.num_est = 3 + self.embed_dim     # 3=predicted_vel, embed_dim=terrain_embed
+        
+        self.rnn_type = rnn_type
+        self.rnn_num_layers = rnn_num_layers
+        self.rnn_num_hidden = rnn_num_hidden 
+        self.iter = 0
+        
+        # ---------------------
+        # Actor head
+        # ---------------------
+        self.actor = nn.Sequential(
+            nn.ELU(),
+            nn.Linear(rnn_num_hidden,512),
+            nn.ELU(),
+            nn.Linear(512,256),
+            nn.ELU(),
+            nn.Linear(256,128),
+            nn.ELU(),
+            nn.Linear(128,num_actions)
+        )
+        
+        # 主RNN：吃 prop + predicted_vel + terrain_embed
+        self.rnn = Memory(
+            self.num_prop + self.num_est,
+            type=rnn_type,
+            num_layers=rnn_num_layers,
+            hidden_size=rnn_num_hidden
+        )
+        
+        # ---------------------
+        # estimator 分支
+        # ---------------------
+        # 用VQ-VAE从高度场得到one-hot表示等
+        self.Vae = PureVqvaeEMA(
+            in_dim=self.num_height,
+            output_dim=self.num_height,
+            num_emb=self.num_height_encode
+        )
+        
+        # 估计器RNN：基于纯 proprioception 去预测速度 / 地形
+        self.est_rnn = Memory(
+            self.num_prop,
+            type=rnn_type,
+            num_layers=rnn_num_layers,
+            hidden_size=rnn_num_hidden
+        )
+        
+        # 速度预测头 (3维)
+        self.predict_vel_layer = nn.Sequential(
+            nn.ELU(),
+            nn.Linear(rnn_num_hidden,128),
+            nn.ELU(),
+            nn.Linear(128,64),
+            nn.ELU(),
+            nn.Linear(64,3)
+        )
+        
+        # 地形latent预测头 (16维) - 暂时保留，因为Loss()里会用
+        self.predict_terrian_layer = nn.Sequential(
+            nn.ELU(),
+            nn.Linear(rnn_num_hidden,128),
+            nn.ELU(),
+            nn.Linear(128,64),
+            nn.ELU(),
+            nn.Linear(64,32)
+        )
+        
+        # one-hot重建头 16 -> 128，用于分类监督
+        self.predict_onehot_layer = nn.Sequential(
+            nn.ELU(),
+            nn.Linear(32,256),
+            nn.ELU(),
+            nn.Linear(256,self.num_height_encode)
+        )
+
+         # 地形latent预测头 (16维) - 暂时保留，因为Loss()里会用
+        self.predict_terrian_layer_e = nn.Sequential(
+            nn.ELU(),
+            nn.Linear(self.num_height,128),
+            nn.ELU(),
+            nn.Linear(128,64),
+            nn.ELU(),
+            nn.Linear(64,32)
+        )
+        
+        # one-hot重建头 16 -> 128，用于分类监督
+        self.predict_onehot_layer_e = nn.Sequential(
+            nn.ELU(),
+            nn.Linear(32,256),
+            nn.ELU(),
+            nn.Linear(256,self.num_height_encode)
+        )
+        
+       
+        self.switch_beta = 1  # 阈值，rec_loss 小于它视为“height可靠”，你自己调
+        self.switch_gamma = 0.2   # 低通滤波系数，越小越平滑
+        self.register_buffer("prev_P", torch.tensor(1.0))
+        self.random = 1
+        
+    def set_random(self,random):
+        self.random = random
+        
+    
+    def forward(self, observations, masks=None, hidden_states=None):
+        
+        if hidden_states:
+            # observations: [T,B,D]，假设最后两列为 terrain_id 和 terrain_flip_flag
+            T, B = observations.shape[0], observations.shape[1]
+            with torch.no_grad():
+                prop = observations[:, :, self.num_height:-2]              
+                terrain_ids = observations[:, :, -2]  # [T,B]
+               
+
+                if terrain_ids.ndim == 3 and terrain_ids.shape[-1] == 1:
+                    terrain_ids = terrain_ids.squeeze(-1)
+                terrain_ids = terrain_ids.long()  # [T,B]
+
+                est_encode = self.est_rnn(prop, masks, hidden_states[1], False)
+                predicted_vel = self.predict_vel_layer(est_encode)                
+                terr_from_prop = self.predict_terrian_layer(est_encode)   # [T,B,C]
+
+                height = observations[:, :, :self.num_height]   
+                terr_from_height = self.predict_terrian_layer_e(height)  # [T,B,C]
+
+           
+            # mask: terrain_id==1 使用 prop
+            use_prop_mask = (terrain_ids == 1) 
+            use_prop_mask = use_prop_mask.unsqueeze(-1)         # [T,B,1]
+
+            terrain_sel = torch.where(use_prop_mask, terr_from_prop, terr_from_height)  # [T,B,C]
+
+            # 拼接 actor 输入
+            actor_input = torch.cat([
+                                prop,                      # [T,B,num_prop]
+                                predicted_vel.detach(),    # [T,B,vel_dim]
+                                terrain_sel.detach()       # [T,B,terr_dim]
+                            ], dim=-1)                     # [T,B, total_dim]
+
+            encode = self.rnn(actor_input, masks, hidden_states[0]).squeeze(0)
+            mean = self.actor(encode)
+
+        else:
+            # 非时间序列分支：observations: [B,D]，假设最后两列为 terrain_id 和 terrain_flip_flag
+            with torch.no_grad():
+                prop = observations[:, self.num_height:-2]                     # [B, ...]
+                terrain_id = observations[:, -2].long()                        # [B]
+                                 
+
+                est_encode = self.est_rnn(prop, masks, hidden_states)
+                est_encode = est_encode.squeeze(0) if est_encode.dim() == 3 else est_encode
+                predicted_vel = self.predict_vel_layer(est_encode)           # [B,vel_dim]
+
+                height = observations[:, :self.num_height]                   # [B,num_height]
+         
+                terr_from_height = self.predict_terrian_layer_e(height)      # [B,C]
+                terr_from_prop   = self.predict_terrian_layer(est_encode)    # [B,C]
+
+
+            # mask: terrain_id==1  使用 prop
+            use_prop_mask = (terrain_id == 1) 
+            terrain_sel = torch.where(use_prop_mask.unsqueeze(-1), terr_from_prop, terr_from_height)  # [B,C]
+
+            # 拼接 actor 输入
+            actor_input = torch.cat([
+                            prop,                      # [B,num_prop]
+                            predicted_vel.detach(),    # [B,vel_dim]
+                            terrain_sel.detach()       # [B,terr_dim]
+                        ], dim=-1)
+
+            encode = self.rnn(actor_input, masks, hidden_states).squeeze(0)
+            mean  = self.actor(encode)
+
+            self.iter += 1
+
+        return mean
+
+    
+    def depoly_forward(self, obs, est_hidden, hidden):
+        """
+        部署(推理)阶段使用:
+        - obs: [T,B,...] 或 [1,B,...] (通常是在线控制时的单步/T=1)
+        - est_hidden, hidden: RNN隐状态
+        """
+        prop = obs[:,:,self.num_height:-2]
+        size = prop.shape
+        
+        est_encode, est_next_hidden = self.est_rnn.depoly_inference(prop, est_hidden)
+        predicted_vel = self.predict_vel_layer(est_encode)  # [T,B,3]
+
+
+        
+        
+        # height from obs
+        height = obs[...,:self.num_height].reshape(-1,self.num_height) 
+
+        recon, _, _, _,  = self.Vae(height)
+        rec_loss = F.mse_loss(recon, height, reduction='none').mean(dim=-1, keepdim=True)  # [B,1]
+        max_rec = rec_loss.max().item()
+        print(f"[rec_loss] max = {max_rec:.6f}")
+       
+        terr_from_prop = self.predict_terrian_layer(est_encode)
+        terr_from_height = self.predict_terrian_layer_e(height).reshape(terr_from_prop.shape[0],terr_from_prop.shape[1],-1)   
+
+        # auto selector
+        hat_P_t = (rec_loss < self.switch_beta).float().reshape(terr_from_prop.shape[0],terr_from_prop.shape[1],-1)        # [B,1]
+        P_prev = self.prev_P                       # [1,1]
+        P_t = (1.0 - self.switch_gamma) * P_prev + self.switch_gamma * hat_P_t
+        self.prev_P = P_t
+
+        use_height = (P_t > 0.5).float()                             # [T,B,1]
+        terrain_fused = use_height * terr_from_height + (1.0 - use_height) * terr_from_prop
+
+        print(f"use_height:{use_height.reshape(-1)}")
+        
+
+        # predicted_onehot_encode_e = self.predict_onehot_layer_e(terr_from_height).reshape(-1,128).contiguous()
+        # pred_class_e = torch.argmax(predicted_onehot_encode_e, dim=-1) 
+        # print(f'地形类别_E: {pred_class_e[0]}')
+
+       
+
+        # predicted_onehot_encode = self.predict_onehot_layer(terr_from_prop).reshape(-1,128).contiguous()
+        # pred_class = torch.argmax(predicted_onehot_encode, dim=-1) 
+        # print(f'地形类别：{pred_class[0]}')
+       
+        
+        actor_input = torch.cat(
+            [prop,
+             predicted_vel,
+             terrain_fused],
+            dim=-1
+        )
+        
+        encode, next_hidden = self.rnn.depoly_inference(actor_input, hidden)
+        mean  = self.actor(encode.squeeze(0))
+        return mean, est_next_hidden, next_hidden
+    
+    def Loss(self,subtask_data):
+        """
+        这个和你原版逻辑一致：
+        - 速度监督 (predicted_vel vs cur_vel_target)
+        - 地形token监督 (predict_onehot_layer vs onehot from VAE)
+        - VQ-VAE 重建损失 rec_loss
+        """
+        obs_batch, critic_obs_batch, next_critic_obs_batch, hid_e_batch, masks_batch = subtask_data
+
+        obs_unpad_batch = unpad_trajectories(obs_batch,masks_batch)
+        height_noise = obs_unpad_batch[...,:self.num_height].reshape(-1,self.num_height).contiguous()
+        
+        # target velocity from critic_obs
+        critic_obs_unpad_batch = unpad_trajectories(critic_obs_batch,masks_batch)
+        cur_vel_target = critic_obs_unpad_batch[...,self.num_height+3:self.num_height+6]
+        
+        prop_batch = obs_batch[:,:,self.num_height:-2]
+        # est hidden
+        hidden = self.est_rnn(prop_batch,masks_batch,hid_e_batch)
+        predicted_vel = self.predict_vel_layer(hidden).squeeze(0)  # [N,3]
+        predicted_terrian_latent = self.predict_terrian_layer(hidden).squeeze(0)  # [N,16]
+        
+        # VQVAE更新/重建
+        height = critic_obs_unpad_batch[...,:self.num_height].reshape(-1,self.num_height).contiguous()
+        recon,quantize,z,onehot_encode = self.Vae(height_noise)
+        vq_loss,rec_loss = self.Vae.loss_fn(height,recon,quantize,z,onehot_encode)
+        
+        predicted_terrian_latent_e = self.predict_terrian_layer_e(height_noise).squeeze(0)  # [N,16]
+
+        # token分类监督
+        predicted_onehot_encode = self.predict_onehot_layer(predicted_terrian_latent).reshape(-1,128).contiguous()
+        target = torch.argmax(onehot_encode.clone().detach(),dim=-1)  # [N]
+        cls_loss = F.cross_entropy(predicted_onehot_encode,target)
+
+        predicted_onehot_encode_e = self.predict_onehot_layer_e(predicted_terrian_latent_e).reshape(-1,128).contiguous()
+        cls_loss_e = F.cross_entropy(predicted_onehot_encode_e,target)
+        
+        mseloss = F.mse_loss(predicted_vel,cur_vel_target.detach())
+
+        # mseloss2 = F.mse_loss(predicted_terrian_latent.reshape(-1,16),predicted_terrian_latent_e.detach())
+
+        loss = cls_loss_e + mseloss + vq_loss + cls_loss
+        
+        return loss
+
+    
 
 
 class DepthPredictor(nn.Module):
