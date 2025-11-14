@@ -13920,7 +13920,7 @@ class RnnTerrianHeight_V4Actor(nn.Module):
                  rnn_num_hidden,
                  rnn_type='gru',
                  rnn_num_layers=1,
-                 embed_dim=32   # <--- 新增：地形embedding的维度
+                 embed_dim=16   # <--- 新增：地形embedding的维度
                  ) -> None:
         
         super().__init__()  # 修正super
@@ -13969,8 +13969,10 @@ class RnnTerrianHeight_V4Actor(nn.Module):
         # 用VQ-VAE从高度场得到one-hot表示等
         self.Vae = PureVqvaeEMA(
             in_dim=self.num_height,
+            latent_dim=self.embed_dim,
             output_dim=self.num_height,
-            num_emb=self.num_height_encode
+            num_emb=self.num_height_encode,
+
         )
         
         # 估计器RNN：基于纯 proprioception 去预测速度 / 地形
@@ -13998,13 +14000,13 @@ class RnnTerrianHeight_V4Actor(nn.Module):
             nn.ELU(),
             nn.Linear(128,64),
             nn.ELU(),
-            nn.Linear(64,32)
+            nn.Linear(64,self.embed_dim)
         )
         
         # one-hot重建头 16 -> 128，用于分类监督
         self.predict_onehot_layer = nn.Sequential(
             nn.ELU(),
-            nn.Linear(32,256),
+            nn.Linear(self.embed_dim,256),
             nn.ELU(),
             nn.Linear(256,self.num_height_encode)
         )
@@ -14016,13 +14018,13 @@ class RnnTerrianHeight_V4Actor(nn.Module):
             nn.ELU(),
             nn.Linear(128,64),
             nn.ELU(),
-            nn.Linear(64,32)
+            nn.Linear(64,self.embed_dim)
         )
         
         # one-hot重建头 16 -> 128，用于分类监督
         self.predict_onehot_layer_e = nn.Sequential(
             nn.ELU(),
-            nn.Linear(32,256),
+            nn.Linear(self.embed_dim,256),
             nn.ELU(),
             nn.Linear(256,self.num_height_encode)
         )
@@ -14163,7 +14165,7 @@ class RnnTerrianHeight_V4Actor(nn.Module):
         actor_input = torch.cat(
             [prop,
              predicted_vel,
-             terrain_fused],
+             terr_from_height],
             dim=-1
         )
         
@@ -14188,10 +14190,11 @@ class RnnTerrianHeight_V4Actor(nn.Module):
         cur_vel_target = critic_obs_unpad_batch[...,self.num_height+3:self.num_height+6]
         
         prop_batch = obs_batch[:,:,self.num_height:-2]
+        terrain_ids = obs_batch[:,:,-2].long()
         # est hidden
         hidden = self.est_rnn(prop_batch,masks_batch,hid_e_batch)
         predicted_vel = self.predict_vel_layer(hidden).squeeze(0)  # [N,3]
-        predicted_terrian_latent = self.predict_terrian_layer(hidden).squeeze(0)  # [N,16]
+        predicted_terrian_latent = self.predict_terrian_layer(hidden).squeeze(0).reshape(-1,self.embed_dim)  # [N,16]
         
         # VQVAE更新/重建
         height = critic_obs_unpad_batch[...,:self.num_height].reshape(-1,self.num_height).contiguous()
@@ -14201,18 +14204,21 @@ class RnnTerrianHeight_V4Actor(nn.Module):
         predicted_terrian_latent_e = self.predict_terrian_layer_e(height_noise).squeeze(0)  # [N,16]
 
         # token分类监督
-        predicted_onehot_encode = self.predict_onehot_layer(predicted_terrian_latent).reshape(-1,128).contiguous()
+      
         target = torch.argmax(onehot_encode.clone().detach(),dim=-1)  # [N]
-        cls_loss = F.cross_entropy(predicted_onehot_encode,target)
-
         predicted_onehot_encode_e = self.predict_onehot_layer_e(predicted_terrian_latent_e).reshape(-1,128).contiguous()
         cls_loss_e = F.cross_entropy(predicted_onehot_encode_e,target)
         
         mseloss = F.mse_loss(predicted_vel,cur_vel_target.detach())
 
-        # mseloss2 = F.mse_loss(predicted_terrian_latent.reshape(-1,16),predicted_terrian_latent_e.detach())
+        terrain_ids_unpad = unpad_trajectories(terrain_ids.unsqueeze(-1), masks_batch).squeeze(-1).long()  # [N]
+        mask_terr1 = (terrain_ids_unpad == 1)
 
-        loss = cls_loss_e + mseloss + vq_loss + cls_loss
+      
+         
+        student_loss = F.mse_loss(predicted_terrian_latent[mask_terr1],predicted_terrian_latent_e.detach()[mask_terr1])
+
+        loss = cls_loss_e + mseloss + vq_loss + student_loss
         
         return loss
 
