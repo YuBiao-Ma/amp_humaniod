@@ -328,6 +328,7 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
             foothold = 0
 
             collision = -1
+            feet_ankle_roll = -5
      
                 
             dof_vel_limits = -0.1
@@ -413,7 +414,7 @@ class G1HeightAmpCfgPPO( LeggedRobotCfgPPO ):
         #     mirror_loss_coeff=1
             
     class runner( LeggedRobotCfgPPO.runner ):
-        empirical_normalization = False
+        empirical_normalization = True
         policy_class_name = "ActorCriticRecurrent"
         max_iterations = 30000
         run_name = 'vaild_g1_amp'

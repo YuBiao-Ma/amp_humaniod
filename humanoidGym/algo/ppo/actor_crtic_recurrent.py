@@ -230,7 +230,7 @@ class ActorCriticRecurrent(nn.Module):
         self.num_actions = num_actions
         self.num_critic_obs = num_critic_obs
         
-        self.actor = RnnTerrianHeight_V4Actor(num_prop=num_prop,
+        self.actor = RnnTerrianHeight_V3Actor(num_prop=num_prop,
                                       actor_dims=[512,256,128],
                                       num_actions=num_actions,
                                       activation=activation,
