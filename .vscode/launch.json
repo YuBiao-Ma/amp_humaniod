@@ -11,13 +11,13 @@
             "program": "humanoidGym/script/train.py",
             "console": "integratedTerminal",
             "args": [
-                "--task", "g1_height_amp",
+                "--task", "g1_uneven_stair_amp",
                 // "--headless",
                 // "--load_run=Oct26_12-02-21_vaild_g1_amp",
                 // "--resume"
                 "--rl_device=cuda:1",
                 "--sim_device=cuda:1",
-                "--run_name=allv3_moe2_16latent_roll",
+                "--run_name=blind",
              
               
             ]

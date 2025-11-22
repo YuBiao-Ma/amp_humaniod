@@ -12937,7 +12937,7 @@ class RnnTerrianLatentActor(nn.Module):
         # update VQVAE
         height = critic_obs_unpad_batch[...,:self.num_height].reshape(-1,self.num_height).contiguous()
         recon,quantize,z,onehot_encode = self.Vae(height)
-        rec_loss = self.Vae.loss_fn(height,recon,quantize,z,onehot_encode)
+        rec_loss,_ = self.Vae.loss_fn(height,recon,quantize,z,onehot_encode)
         
         # predict encode    
         predicted_onehot_encode = self.predict_onehot_layer(predicted_terrian_latent).reshape(-1,128).contiguous()
@@ -13449,16 +13449,20 @@ class RnnTerrianHeight_V2Actor(nn.Module):
         # ---------------------
         # Actor head
         # ---------------------
-        self.actor = nn.Sequential(
-            nn.ELU(),
-            nn.Linear(rnn_num_hidden,512),
-            nn.ELU(),
-            nn.Linear(512,256),
-            nn.ELU(),
-            nn.Linear(256,128),
-            nn.ELU(),
-            nn.Linear(128,num_actions)
-        )
+        # self.actor = nn.Sequential(
+        #     nn.ELU(),
+        #     nn.Linear(rnn_num_hidden,512),
+        #     nn.ELU(),
+        #     nn.Linear(512,256),
+        #     nn.ELU(),
+        #     nn.Linear(256,128),
+        #     nn.ELU(),
+        #     nn.Linear(128,num_actions)
+        # )
+        self.actor = MixedMLP(experts=4,
+                              gate_input_dim=rnn_num_hidden,
+                              expert_input_dim=rnn_num_hidden,
+                              output_dim=num_actions)
         
         # 主RNN：吃 prop + predicted_vel + terrain_embed
         self.rnn = Memory(
@@ -13571,7 +13575,7 @@ class RnnTerrianHeight_V2Actor(nn.Module):
             )  # [T,B,num_prop+3+embed_dim]
             
             encode = self.rnn(actor_input, masks, hidden_states[0]).squeeze(0)
-            mean  = self.actor(encode)
+            mean  = self.actor(encode,encode)
         
         else:
             # ----------------------------
@@ -13598,7 +13602,7 @@ class RnnTerrianHeight_V2Actor(nn.Module):
             )  # [B,num_prop+3+embed_dim]
             
             encode = self.rnn(actor_input, masks, hidden_states).squeeze(0)
-            mean  = self.actor(encode)
+            mean  = self.actor(encode,encode)
     
         return mean
     
@@ -13728,7 +13732,7 @@ class RnnTerrianHeight_V3Actor(nn.Module):
         #     nn.Linear(128,num_actions)
         # )
         self.actor = MixedMLP(experts=2,
-                              gate_input_dim=rnn_num_hidden,
+                              gate_input_dim=rnn_num_hidden+1,
                               expert_input_dim=rnn_num_hidden,
                               output_dim=num_actions)
 
@@ -13853,7 +13857,9 @@ class RnnTerrianHeight_V3Actor(nn.Module):
                             ], dim=-1)                     # [T,B, total_dim]
 
             encode = self.rnn(actor_input, masks, hidden_states[0]).squeeze(0)
-            mean = self.actor(encode,encode)
+            use_prop_mask_unpad = unpad_trajectories(use_prop_mask, masks) 
+            gate_input = torch.cat([encode, use_prop_mask_unpad.float()], dim=-1)
+            mean = self.actor(gate_input,encode)
 
         else:
             # 非时间序列分支：observations: [B,D]，假设最后两列为 terrain_id 和 terrain_flip_flag
@@ -13886,7 +13892,8 @@ class RnnTerrianHeight_V3Actor(nn.Module):
                         ], dim=-1)
 
             encode = self.rnn(actor_input, masks, hidden_states).squeeze(0)
-            mean = self.actor(encode,encode)
+            gate_input = torch.cat([encode, use_prop_mask.float().unsqueeze(-1)], dim=-1)
+            mean = self.actor(gate_input,encode)
 
             self.iter += 1
 
@@ -14043,8 +14050,8 @@ class RnnTerrianHeight_V4Actor(nn.Module):
         #     nn.ELU(),
         #     nn.Linear(128,num_actions)
         # )
-        self.actor = MixedMLP(experts=4,
-                              gate_input_dim=rnn_num_hidden,
+        self.actor = MixedMLP(experts=2,
+                              gate_input_dim=rnn_num_hidden + 1,
                               expert_input_dim=rnn_num_hidden,
                               output_dim=num_actions)
 
@@ -14170,7 +14177,9 @@ class RnnTerrianHeight_V4Actor(nn.Module):
 
             encode = self.rnn(actor_input, masks, hidden_states[0]).squeeze(0)
             # mean = self.actor(encode)
-            mean = self.actor(encode,encode)
+            use_prop_mask_unpad = unpad_trajectories(use_prop_mask, masks) 
+            gate_input = torch.cat([encode, use_prop_mask_unpad.float()], dim=-1)
+            mean = self.actor(gate_input,encode)
 
         else:
             # 非时间序列分支：observations: [B,D]，假设最后两列为 terrain_id 和 terrain_flip_flag
@@ -14202,7 +14211,8 @@ class RnnTerrianHeight_V4Actor(nn.Module):
 
             encode = self.rnn(actor_input, masks, hidden_states).squeeze(0)
             # mean  = self.actor(encode)
-            mean = self.actor(encode,encode)
+            gate_input = torch.cat([encode, use_prop_mask.float().unsqueeze(-1)], dim=-1)
+            mean = self.actor(gate_input,encode)
 
             self.iter += 1
 
@@ -14300,21 +14310,26 @@ class RnnTerrianHeight_V4Actor(nn.Module):
         predicted_terrian_latent_e = self.predict_terrian_layer_e(height_noise).squeeze(0)  # [N,16]
 
         # token分类监督
+        
       
         target = torch.argmax(onehot_encode.clone().detach(),dim=-1)  # [N]
         predicted_onehot_encode_e = self.predict_onehot_layer_e(predicted_terrian_latent_e).reshape(-1,128).contiguous()
         cls_loss_e = F.cross_entropy(predicted_onehot_encode_e,target)
+
+        predicted_onehot_encode = self.predict_onehot_layer(predicted_terrian_latent).reshape(-1,128).contiguous()
+        # target = torch.argmax(onehot_encode.clone().detach(),dim=-1)  # [N]
+        cls_loss = F.cross_entropy(predicted_onehot_encode,target)
         
         mseloss = F.mse_loss(predicted_vel,cur_vel_target.detach())
 
-        terrain_ids_unpad = unpad_trajectories(terrain_ids.unsqueeze(-1), masks_batch).squeeze(-1).long()  # [N]
-        mask_terr1 = (terrain_ids_unpad == 1).reshape(-1)
+        # terrain_ids_unpad = unpad_trajectories(terrain_ids.unsqueeze(-1), masks_batch).squeeze(-1).long()  # [N]
+        # mask_terr1 = (terrain_ids_unpad == 1).reshape(-1)
 
       
          
-        student_loss = F.mse_loss(predicted_terrian_latent[mask_terr1],predicted_terrian_latent_e.detach()[mask_terr1])
+        # student_loss = F.mse_loss(predicted_terrian_latent[mask_terr1],predicted_terrian_latent_e.detach()[mask_terr1])
 
-        loss = cls_loss_e + mseloss + vq_loss + 0.01*student_loss
+        loss = cls_loss_e + mseloss + vq_loss + cls_loss
         
         return loss
 

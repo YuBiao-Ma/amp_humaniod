@@ -58,7 +58,7 @@ class G1HeightAmpCfg( LeggedRobotCfg ):
         num_envs = 5120
 
         num_height = 187
-        num_single_observations = 72 + num_height
+        num_single_observations = 72 + num_height + 2
         num_critic_single_observations = 80 +20
        
         num_actions = 21
@@ -417,8 +417,8 @@ class G1HeightAmpCfgPPO( LeggedRobotCfgPPO ):
         empirical_normalization = True
         policy_class_name = "ActorCriticRecurrent"
         max_iterations = 30000
-       
-        experiment_name = 'g1_height'
+        run_name = 'vaild_g1_amp'
+        experiment_name = 'g1'
         
         amp_motion_files = MOTION_FILES
         amp_num_preload_transitions = 2000000

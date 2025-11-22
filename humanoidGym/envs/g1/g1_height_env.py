@@ -319,7 +319,7 @@ class AmpG1HeightRobot(LeggedRobot):
         self.action_scales = torch.tensor(self.cfg.control.action_scales).to(self.device).unsqueeze(0)
 
     def _init_terrain_id(self):
-        if 0: #CTS
+        if 1: #CTS
             start1, end1 = self.wave_start_idx, self.stairdown_end_idx
             start2, end2 = self.roughflat_start_idx, self.roughflat_end_idx
 
@@ -462,7 +462,7 @@ class AmpG1HeightRobot(LeggedRobot):
         self._init_foot()
         self._init_mirror()
         self._init_action_scales()
-        self._init_terrain_id()
+        # self._init_terrain_id()
         if self.cfg.depth.use_camera:
             self.depth_buffer = torch.zeros(self.cfg.depth.camera_num_envs,
                                             self.cfg.depth.buffer_len,
@@ -967,9 +967,7 @@ class AmpG1HeightRobot(LeggedRobot):
         """ Computes observations
         """
         
-        # if (self.global_counter -1 ) % (20*24) == 0:
-        #     self.flip_flag[self.wave_start_idx:self.stairdown_end_idx] = 1 - self.flip_flag[self.wave_start_idx:self.stairdown_end_idx]
-        #     self.flip_flag[self.roughflat_start_idx:self.roughflat_end_idx] = 1 - self.flip_flag[self.roughflat_start_idx:self.roughflat_end_idx]
+      
         single_obs = torch.cat((
                             self.commands[:, :3] * self.commands_scale,
                             self.base_ang_vel  * self.obs_scales.ang_vel,
@@ -977,8 +975,6 @@ class AmpG1HeightRobot(LeggedRobot):
                             (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
                             self.dof_vel * self.obs_scales.dof_vel,
                             self.actions,
-                            self.terrain_ids,
-                            self.flip_flag
                             ),dim=-1)
         
         single_privileged_obs = torch.cat((
