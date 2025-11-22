@@ -865,3 +865,14 @@ class AmpG1Robot(LeggedRobot):
 
 
         return penalty
+    
+    def _reward_feet_ankle_roll(self):
+     
+        contact_force = torch.norm(self.contact_forces[:, self.feet_indices, :],dim=-1)
+        contact = (contact_force > 0.5).float()   # [N_env, n_feet]
+        ankle_roll = torch.abs(self.dof_pos[:, [5,11]])
+      
+        roll_over = (ankle_roll - 0.1).clip(min=0.0)
+        
+        roll_penalty = torch.sum(roll_over* contact, dim=1) 
+        return roll_penalty

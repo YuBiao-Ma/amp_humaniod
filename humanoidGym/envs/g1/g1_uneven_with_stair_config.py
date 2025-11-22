@@ -238,6 +238,7 @@ class G1UnevenStairAmpCfg( LeggedRobotCfg ):
         soft_torque_limit = 0.8
         base_height_target = 0.78
         max_contact_force = 500
+        reward_curriculum = False
         # only_positive_rewards = False
         class scales( LeggedRobotCfg.rewards.scales ):
             tracking_lin_vel = 3.0
@@ -263,6 +264,7 @@ class G1UnevenStairAmpCfg( LeggedRobotCfg ):
             yaw_error_when_rate_matches = -0.1
             stumble = -5.0
             # termination = -10
+            feet_ankle_roll = -5
                 
             dof_vel_limits = -0.1
             dof_pos_limits = -10.
@@ -350,8 +352,8 @@ class G1UnevenStairAmpCfgPPO( LeggedRobotCfgPPO ):
         empirical_normalization = True
         policy_class_name = "ActorCriticRecurrent"
         max_iterations = 30000
-        run_name = 'vaild_g1_amp'
-        experiment_name = 'g1'
+        # run_name = 'vaild_g1_amp'
+        experiment_name = 'g1_blind'
         
         amp_motion_files = MOTION_FILES
         amp_num_preload_transitions = 2000000

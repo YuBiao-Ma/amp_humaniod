@@ -331,7 +331,7 @@ class AmpG1HeightRobot(LeggedRobot):
             perm1 = idxs1[torch.randperm(len(idxs1))]
             perm2 = idxs2[torch.randperm(len(idxs2))]
 
-            ratio = 3/4  # or 0.8
+            ratio = 1/3  # or 0.8
             take1 = perm1[: int(len(perm1) * ratio) ]
             take2 = perm2[: int(len(perm2) * ratio) ]
 
@@ -462,7 +462,7 @@ class AmpG1HeightRobot(LeggedRobot):
         self._init_foot()
         self._init_mirror()
         self._init_action_scales()
-        self._init_terrain_id()
+        # self._init_terrain_id()
         if self.cfg.depth.use_camera:
             self.depth_buffer = torch.zeros(self.cfg.depth.camera_num_envs,
                                             self.cfg.depth.buffer_len,
@@ -967,9 +967,7 @@ class AmpG1HeightRobot(LeggedRobot):
         """ Computes observations
         """
         
-        if (self.global_counter -1 ) % (20*24) == 0:
-            self.flip_flag[self.wave_start_idx:self.stairdown_end_idx] = 1 - self.flip_flag[self.wave_start_idx:self.stairdown_end_idx]
-            self.flip_flag[self.roughflat_start_idx:self.roughflat_end_idx] = 1 - self.flip_flag[self.roughflat_start_idx:self.roughflat_end_idx]
+      
         single_obs = torch.cat((
                             self.commands[:, :3] * self.commands_scale,
                             self.base_ang_vel  * self.obs_scales.ang_vel,
@@ -977,8 +975,6 @@ class AmpG1HeightRobot(LeggedRobot):
                             (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
                             self.dof_vel * self.obs_scales.dof_vel,
                             self.actions,
-                            self.terrain_ids,
-                            self.flip_flag
                             ),dim=-1)
         
         single_privileged_obs = torch.cat((
@@ -1931,3 +1927,15 @@ class AmpG1HeightRobot(LeggedRobot):
 
     
         return r
+    
+
+    def _reward_feet_ankle_roll(self):
+     
+        contact_force = torch.norm(self.contact_forces[:, self.feet_indices, :],dim=-1)
+        contact = (contact_force > 0.5).float()   # [N_env, n_feet]
+        ankle_roll = torch.abs(self.dof_pos[:, [5,11]])
+      
+        roll_over = (ankle_roll - 0.1).clip(min=0.0)
+        
+        roll_penalty = torch.sum(roll_over* contact, dim=1) 
+        return roll_penalty

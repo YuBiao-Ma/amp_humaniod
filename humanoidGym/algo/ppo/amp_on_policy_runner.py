@@ -163,6 +163,9 @@ class AmpOnPolicyRunner:
             if (self.env.cfg.rewards.reward_curriculum):
                 self.env.update_reward_curriculum(it)
             start = time.time()
+            # if  it % 20 ==0:
+            #     self.env.flip_flag[self.env.wave_start_idx:self.env.stairdown_end_idx] = 1 - self.env.flip_flag[self.env.wave_start_idx:self.env.stairdown_end_idx]
+            #     self.env.flip_flag[self.env.roughflat_start_idx:self.env.roughflat_end_idx] = 1 - self.env.flip_flag[self.env.roughflat_start_idx:self.env.roughflat_end_idx]
             # Rollout
             with torch.inference_mode():
                 for _ in range(self.num_steps_per_env):
@@ -192,7 +195,10 @@ class AmpOnPolicyRunner:
                     # Normalize observations
                     n,d = obs.size()
                     obs = self.obs_normalizer(obs.reshape(-1,self.env.cfg.env.num_observations)).reshape(n,d)
-                    
+                   
+                    # obs[:,-2] = self.env.terrain_ids.squeeze(-1)
+                    # obs[:,-1] = self.env.flip_flag.squeeze(-1)
+
                     # Extract critic observations and normalize
                     if "critic" in infos["observations"]:
                         critic_obs = self.critic_obs_normalizer(critic_obs)

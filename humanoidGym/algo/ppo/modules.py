@@ -79,7 +79,91 @@ def mlp_batchnorm_factory(activation, input_dims, out_dims, hidden_dims,last_act
         layers.append(activation)
 
     return layers
+
+
+class ExpertLinearVectorized(nn.Module):
+    def __init__(self, experts, input_dim, output_dim):
+        super(ExpertLinearVectorized, self).__init__()
+        self.experts = experts
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.W = self.weights([experts, input_dim, output_dim])
+        self.b = self.bias([experts, output_dim])  # 修改为 [experts, output_dim]
+
+    def forward(self, x, weights):
+        # 处理不同维度的输入
+        if len(x.shape) == 2:  # [batch_size, input_dim]
+            batch_size = x.shape[0]
+            # 计算所有专家的输出 [batch_size, experts, output_dim]
+            expert_outputs = torch.einsum('bi,eio->beo', x, self.W) + self.b.unsqueeze(0)
+            
+            # 加权求和 [batch_size, output_dim]
+            y = torch.einsum('be,beo->bo', weights, expert_outputs)
+            
+        elif len(x.shape) == 3:  # [batch_size, length, input_dim]
+            batch_size, length, input_dim = x.shape
+            # 重塑为 [batch_size * length, input_dim]
+            x_flat = x.reshape(-1, input_dim)
+            
+            # 每个时间步使用相同的权重 
+            # weights_expanded = weights.unsqueeze(1).expand(batch_size, length, self.experts)
+            weights_flat = weights.reshape(-1, self.experts)
+            
+            # 计算所有专家的输出 [batch_size * length, experts, output_dim]
+            expert_outputs_flat = torch.einsum('bi,eio->beo', x_flat, self.W) + self.b.unsqueeze(0)
+            
+            # 加权求和 [batch_size * length, output_dim]
+            y_flat = torch.einsum('be,beo->bo', weights_flat, expert_outputs_flat)
+            
+            # 恢复原始形状 [batch_size, length, output_dim]
+            y = y_flat.reshape(batch_size, length, self.output_dim)
+            
+        else:
+            raise ValueError(f"输入维度 {x.shape} 不支持")
+        
+        return y
+
+    def weights(self, shape):
+        alpha_bound = np.sqrt(6.0 / np.prod(shape[-2:]))
+        alpha = np.asarray(np.random.uniform(low=-alpha_bound, high=alpha_bound, size=shape), dtype=np.float32)
+        return torch.nn.Parameter(torch.from_numpy(alpha), requires_grad=True)
+
+    def bias(self, shape):
+        # 直接创建 [experts, output_dim] 形状的偏置
+        return torch.nn.Parameter(torch.zeros(shape, dtype=torch.float), requires_grad=True)
     
+class MixedMLP(nn.Module):
+    def __init__(self, experts, gate_input_dim, expert_input_dim, output_dim):
+        super(MixedMLP, self).__init__()
+        # gating 
+        self.gating = nn.Sequential(nn.Linear(gate_input_dim,256),
+                                   nn.ELU(),
+                                   nn.Linear(256,128),
+                                   nn.ELU(),
+                                   nn.Linear(128,experts))
+        # expert
+        self.e1 = ExpertLinearVectorized(experts,expert_input_dim,512)
+        self.e2 = ExpertLinearVectorized(experts,512,256)
+        self.e3 = ExpertLinearVectorized(experts,256,128)
+        self.e4 = ExpertLinearVectorized(experts,128,output_dim)
+        
+    def forward(self,gate_input,expert_input):
+      
+        weights = F.softmax(self.gating(gate_input),dim=-1)
+
+        out = self.e1(expert_input,weights)
+        out = F.elu(out)
+        
+        out = self.e2(out, weights)
+        out = F.elu(out)
+        
+        out = self.e3(out, weights)
+        out = F.elu(out)
+        
+        out = self.e4(out, weights)
+        
+        return out 
+
 class BetaVAE(nn.Module):
 
     def __init__(self,
@@ -12853,7 +12937,7 @@ class RnnTerrianLatentActor(nn.Module):
         # update VQVAE
         height = critic_obs_unpad_batch[...,:self.num_height].reshape(-1,self.num_height).contiguous()
         recon,quantize,z,onehot_encode = self.Vae(height)
-        rec_loss = self.Vae.loss_fn(height,recon,quantize,z,onehot_encode)
+        rec_loss,_ = self.Vae.loss_fn(height,recon,quantize,z,onehot_encode)
         
         # predict encode    
         predicted_onehot_encode = self.predict_onehot_layer(predicted_terrian_latent).reshape(-1,128).contiguous()
@@ -13365,16 +13449,20 @@ class RnnTerrianHeight_V2Actor(nn.Module):
         # ---------------------
         # Actor head
         # ---------------------
-        self.actor = nn.Sequential(
-            nn.ELU(),
-            nn.Linear(rnn_num_hidden,512),
-            nn.ELU(),
-            nn.Linear(512,256),
-            nn.ELU(),
-            nn.Linear(256,128),
-            nn.ELU(),
-            nn.Linear(128,num_actions)
-        )
+        # self.actor = nn.Sequential(
+        #     nn.ELU(),
+        #     nn.Linear(rnn_num_hidden,512),
+        #     nn.ELU(),
+        #     nn.Linear(512,256),
+        #     nn.ELU(),
+        #     nn.Linear(256,128),
+        #     nn.ELU(),
+        #     nn.Linear(128,num_actions)
+        # )
+        self.actor = MixedMLP(experts=4,
+                              gate_input_dim=rnn_num_hidden,
+                              expert_input_dim=rnn_num_hidden,
+                              output_dim=num_actions)
         
         # 主RNN：吃 prop + predicted_vel + terrain_embed
         self.rnn = Memory(
@@ -13487,7 +13575,7 @@ class RnnTerrianHeight_V2Actor(nn.Module):
             )  # [T,B,num_prop+3+embed_dim]
             
             encode = self.rnn(actor_input, masks, hidden_states[0]).squeeze(0)
-            mean  = self.actor(encode)
+            mean  = self.actor(encode,encode)
         
         else:
             # ----------------------------
@@ -13514,7 +13602,7 @@ class RnnTerrianHeight_V2Actor(nn.Module):
             )  # [B,num_prop+3+embed_dim]
             
             encode = self.rnn(actor_input, masks, hidden_states).squeeze(0)
-            mean  = self.actor(encode)
+            mean  = self.actor(encode,encode)
     
         return mean
     
@@ -13633,17 +13721,21 @@ class RnnTerrianHeight_V3Actor(nn.Module):
         # ---------------------
         # Actor head
         # ---------------------
-        self.actor = nn.Sequential(
-            nn.ELU(),
-            nn.Linear(rnn_num_hidden,512),
-            nn.ELU(),
-            nn.Linear(512,256),
-            nn.ELU(),
-            nn.Linear(256,128),
-            nn.ELU(),
-            nn.Linear(128,num_actions)
-        )
-        
+        # self.actor = nn.Sequential(
+        #     nn.ELU(),
+        #     nn.Linear(rnn_num_hidden,512),
+        #     nn.ELU(),
+        #     nn.Linear(512,256),
+        #     nn.ELU(),
+        #     nn.Linear(256,128),
+        #     nn.ELU(),
+        #     nn.Linear(128,num_actions)
+        # )
+        self.actor = MixedMLP(experts=2,
+                              gate_input_dim=rnn_num_hidden+1,
+                              expert_input_dim=rnn_num_hidden,
+                              output_dim=num_actions)
+
         # 主RNN：吃 prop + predicted_vel + terrain_embed
         self.rnn = Memory(
             self.num_prop + self.num_est,
@@ -13658,6 +13750,7 @@ class RnnTerrianHeight_V3Actor(nn.Module):
         # 用VQ-VAE从高度场得到one-hot表示等
         self.Vae = PureVqvaeEMA(
             in_dim=self.num_height,
+            latent_dim=self.embed_dim,
             output_dim=self.num_height,
             num_emb=self.num_height_encode
         )
@@ -13687,13 +13780,13 @@ class RnnTerrianHeight_V3Actor(nn.Module):
             nn.ELU(),
             nn.Linear(128,64),
             nn.ELU(),
-            nn.Linear(64,16)
+            nn.Linear(64,self.embed_dim)
         )
         
         # one-hot重建头 16 -> 128，用于分类监督
         self.predict_onehot_layer = nn.Sequential(
             nn.ELU(),
-            nn.Linear(16,256),
+            nn.Linear(self.embed_dim,256),
             nn.ELU(),
             nn.Linear(256,self.num_height_encode)
         )
@@ -13705,13 +13798,13 @@ class RnnTerrianHeight_V3Actor(nn.Module):
             nn.ELU(),
             nn.Linear(128,64),
             nn.ELU(),
-            nn.Linear(64,16)
+            nn.Linear(64,self.embed_dim)
         )
         
         # one-hot重建头 16 -> 128，用于分类监督
         self.predict_onehot_layer_e = nn.Sequential(
             nn.ELU(),
-            nn.Linear(16,256),
+            nn.Linear(self.embed_dim,256),
             nn.ELU(),
             nn.Linear(256,self.num_height_encode)
         )
@@ -13764,7 +13857,9 @@ class RnnTerrianHeight_V3Actor(nn.Module):
                             ], dim=-1)                     # [T,B, total_dim]
 
             encode = self.rnn(actor_input, masks, hidden_states[0]).squeeze(0)
-            mean = self.actor(encode)
+            use_prop_mask_unpad = unpad_trajectories(use_prop_mask, masks) 
+            gate_input = torch.cat([encode, use_prop_mask_unpad.float()], dim=-1)
+            mean = self.actor(gate_input,encode)
 
         else:
             # 非时间序列分支：observations: [B,D]，假设最后两列为 terrain_id 和 terrain_flip_flag
@@ -13797,7 +13892,8 @@ class RnnTerrianHeight_V3Actor(nn.Module):
                         ], dim=-1)
 
             encode = self.rnn(actor_input, masks, hidden_states).squeeze(0)
-            mean  = self.actor(encode)
+            gate_input = torch.cat([encode, use_prop_mask.float().unsqueeze(-1)], dim=-1)
+            mean = self.actor(gate_input,encode)
 
             self.iter += 1
 
@@ -13944,17 +14040,22 @@ class RnnTerrianHeight_V4Actor(nn.Module):
         # ---------------------
         # Actor head
         # ---------------------
-        self.actor = nn.Sequential(
-            nn.ELU(),
-            nn.Linear(rnn_num_hidden,512),
-            nn.ELU(),
-            nn.Linear(512,256),
-            nn.ELU(),
-            nn.Linear(256,128),
-            nn.ELU(),
-            nn.Linear(128,num_actions)
-        )
-        
+        # self.actor = nn.Sequential(
+        #     nn.ELU(),
+        #     nn.Linear(rnn_num_hidden,512),
+        #     nn.ELU(),
+        #     nn.Linear(512,256),
+        #     nn.ELU(),
+        #     nn.Linear(256,128),
+        #     nn.ELU(),
+        #     nn.Linear(128,num_actions)
+        # )
+        self.actor = MixedMLP(experts=2,
+                              gate_input_dim=rnn_num_hidden + 1,
+                              expert_input_dim=rnn_num_hidden,
+                              output_dim=num_actions)
+
+
         # 主RNN：吃 prop + predicted_vel + terrain_embed
         self.rnn = Memory(
             self.num_prop + self.num_est,
@@ -14075,7 +14176,10 @@ class RnnTerrianHeight_V4Actor(nn.Module):
                             ], dim=-1)                     # [T,B, total_dim]
 
             encode = self.rnn(actor_input, masks, hidden_states[0]).squeeze(0)
-            mean = self.actor(encode)
+            # mean = self.actor(encode)
+            use_prop_mask_unpad = unpad_trajectories(use_prop_mask, masks) 
+            gate_input = torch.cat([encode, use_prop_mask_unpad.float()], dim=-1)
+            mean = self.actor(gate_input,encode)
 
         else:
             # 非时间序列分支：observations: [B,D]，假设最后两列为 terrain_id 和 terrain_flip_flag
@@ -14106,7 +14210,9 @@ class RnnTerrianHeight_V4Actor(nn.Module):
                         ], dim=-1)
 
             encode = self.rnn(actor_input, masks, hidden_states).squeeze(0)
-            mean  = self.actor(encode)
+            # mean  = self.actor(encode)
+            gate_input = torch.cat([encode, use_prop_mask.float().unsqueeze(-1)], dim=-1)
+            mean = self.actor(gate_input,encode)
 
             self.iter += 1
 
@@ -14148,18 +14254,18 @@ class RnnTerrianHeight_V4Actor(nn.Module):
         use_height = (P_t > 0.5).float()                             # [T,B,1]
         terrain_fused = use_height * terr_from_height + (1.0 - use_height) * terr_from_prop
 
-        print(f"use_height:{use_height.reshape(-1)}")
+        # print(f"use_height:{use_height.reshape(-1)}")
         
 
-        # predicted_onehot_encode_e = self.predict_onehot_layer_e(terr_from_height).reshape(-1,128).contiguous()
-        # pred_class_e = torch.argmax(predicted_onehot_encode_e, dim=-1) 
-        # print(f'地形类别_E: {pred_class_e[0]}')
+        predicted_onehot_encode_e = self.predict_onehot_layer_e(terr_from_height).reshape(-1,128).contiguous()
+        pred_class_e = torch.argmax(predicted_onehot_encode_e, dim=-1) 
+        print(f'地形类别_E: {pred_class_e[0]}')
 
        
 
-        # predicted_onehot_encode = self.predict_onehot_layer(terr_from_prop).reshape(-1,128).contiguous()
-        # pred_class = torch.argmax(predicted_onehot_encode, dim=-1) 
-        # print(f'地形类别：{pred_class[0]}')
+        predicted_onehot_encode = self.predict_onehot_layer(terr_from_prop).reshape(-1,128).contiguous()
+        pred_class = torch.argmax(predicted_onehot_encode, dim=-1) 
+        print(f'地形类别：{pred_class[0]}')
        
         
         actor_input = torch.cat(
@@ -14194,7 +14300,7 @@ class RnnTerrianHeight_V4Actor(nn.Module):
         # est hidden
         hidden = self.est_rnn(prop_batch,masks_batch,hid_e_batch)
         predicted_vel = self.predict_vel_layer(hidden).squeeze(0)  # [N,3]
-        predicted_terrian_latent = self.predict_terrian_layer(hidden).squeeze(0).reshape(-1,self.embed_dim)  # [N,16]
+        predicted_terrian_latent = self.predict_terrian_layer(hidden).squeeze(0).reshape(-1,self.embed_dim) # [N,16]
         
         # VQVAE更新/重建
         height = critic_obs_unpad_batch[...,:self.num_height].reshape(-1,self.num_height).contiguous()
@@ -14204,21 +14310,26 @@ class RnnTerrianHeight_V4Actor(nn.Module):
         predicted_terrian_latent_e = self.predict_terrian_layer_e(height_noise).squeeze(0)  # [N,16]
 
         # token分类监督
+        
       
         target = torch.argmax(onehot_encode.clone().detach(),dim=-1)  # [N]
         predicted_onehot_encode_e = self.predict_onehot_layer_e(predicted_terrian_latent_e).reshape(-1,128).contiguous()
         cls_loss_e = F.cross_entropy(predicted_onehot_encode_e,target)
+
+        predicted_onehot_encode = self.predict_onehot_layer(predicted_terrian_latent).reshape(-1,128).contiguous()
+        # target = torch.argmax(onehot_encode.clone().detach(),dim=-1)  # [N]
+        cls_loss = F.cross_entropy(predicted_onehot_encode,target)
         
         mseloss = F.mse_loss(predicted_vel,cur_vel_target.detach())
 
-        terrain_ids_unpad = unpad_trajectories(terrain_ids.unsqueeze(-1), masks_batch).squeeze(-1).long()  # [N]
-        mask_terr1 = (terrain_ids_unpad == 1)
+        # terrain_ids_unpad = unpad_trajectories(terrain_ids.unsqueeze(-1), masks_batch).squeeze(-1).long()  # [N]
+        # mask_terr1 = (terrain_ids_unpad == 1).reshape(-1)
 
       
          
-        student_loss = F.mse_loss(predicted_terrian_latent[mask_terr1],predicted_terrian_latent_e.detach()[mask_terr1])
+        # student_loss = F.mse_loss(predicted_terrian_latent[mask_terr1],predicted_terrian_latent_e.detach()[mask_terr1])
 
-        loss = cls_loss_e + mseloss + vq_loss + student_loss
+        loss = cls_loss_e + mseloss + vq_loss + cls_loss
         
         return loss
 

@@ -10,8 +10,8 @@ from .lite.lite_lstm_config import LiteAmpLSTMCfg, LiteAmpCfgLSTMPPO
 
 from .long.long_uneven_env import LongUnevenRobot
 from .g1.g1_amp_env import AmpG1Robot
-from .g1.g1_height_env import AmpG1HeightRobot
-from .g1.g1_height_config import G1HeightAmpCfgPPO,G1HeightAmpCfg
+from .g1.g1_height_prop_env import AmpG1HeightRobot
+from .g1.g1_height_prop_config import G1HeightAmpCfgPPO,G1HeightAmpCfg
 from .g1.g1_image_env import AmpG1ImageRobot
 from .lite.lite_amp_env import LiteRobot
 from .g1.g1_uneven_with_stair_config import G1UnevenStairAmpCfg,G1UnevenStairAmpCfgPPO
