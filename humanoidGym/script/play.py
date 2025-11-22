@@ -19,11 +19,11 @@ def play(args):
     # override some parameters for testing
     num_play_envs = 20
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, num_play_envs)
-    # env_cfg.terrain.num_rows = 5
-    # env_cfg.terrain.num_cols = 1
+    env_cfg.terrain.num_rows = 5
+    env_cfg.terrain.num_cols = 1
     #env_cfg.terrain.mesh_type = 'plane'
     env_cfg.terrain.curriculum = False
-    env_cfg.terrain.selected = False
+    env_cfg.terrain.selected = True
     env_cfg.noise.add_noise = False
     env_cfg.domain_rand.randomize_friction = False
     env_cfg.domain_rand.push_robots = False
@@ -39,7 +39,7 @@ def play(args):
     env_cfg.domain_rand.randomize_inertia = False
 
     env_cfg.env.test = False
-    env_cfg.commands.ranges.lin_vel_x = [1.5,1.5]
+    env_cfg.commands.ranges.lin_vel_x = [1.8,1.8]
     env_cfg.commands.ranges.lin_vel_y = [0,0]
     env_cfg.commands.ranges.heading = [0,0]
     env_cfg.commands.ranges.ang_vel_yaw = [0,0]
@@ -54,7 +54,7 @@ def play(args):
     #     'climb': [0, 0, 0, 0, 0, 0, 1.0, 0, 0, 0],
     #     'tilt': [0, 0, 0, 0, 0, 0, 0, 1.0, 0, 0],
     #     'crawl': [0, 0, 0, 0, 0, 0, 0, 0, 1.0, 0],
-    #  }["climb"]
+    #  }["stair"]
 
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
@@ -82,6 +82,13 @@ def play(args):
     for i in range(10*int(env.max_episode_length)):
         actions,est_h0,est_c0,h0,c0 = policy(obs.detach(),est_h0,est_c0,h0,c0)
         obs,rews, dones, infos = env.step(actions.detach())
+        if dones.any():
+            # 三维状态是 [1, N, 256]，在第 2 维上选中要清零的 env
+            est_h0[:, dones, :] = 0.0
+            est_c0[:, dones, :] = 0.0
+            h0[:,     dones, :] = 0.0
+            c0[:,     dones, :] = 0.0
+    
     
 if __name__ == '__main__':
     EXPORT_POLICY = False

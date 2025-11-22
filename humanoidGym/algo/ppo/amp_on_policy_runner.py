@@ -451,7 +451,7 @@ class AmpOnPolicyRunner:
         if device is not None:
             self.alg.actor_critic.to(device)
         if self.alg.actor_critic.is_recurrent:
-            policy = self.alg.actor_critic.actor
+            policy = InferenceActorLSTM(self.alg.actor_critic.actor,self.obs_normalizer)
         else:
             policy = self.alg.actor_critic.actor_teacher_backbone#actor_teacher_backbone
         if self.cfg["empirical_normalization"]:

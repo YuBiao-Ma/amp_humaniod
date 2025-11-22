@@ -117,13 +117,15 @@ class TerrainParkour:
             
             terrain_utils.random_uniform_terrain(terrain, min_height=-0.05, max_height=0.05, step=0.005,
                                                  downsampled_scale=0.2)
-            if i == 0:
-                climb_terrain(terrain, depth=0.5, platform_size=4.)
-            if i == 2:
-                pyramid_stairs_terrain(terrain, step_width=0.33, step_height=0.15, platform_size=3.)
-            
-            if i == 1:
-                gap_terrain(terrain, gap_size=0.5, platform_size=4.)
+            # if i == 2:
+            #     climb_terrain(terrain, depth=0.5, platform_size=4.)
+            # if i == 0:
+            #     pyramid_stairs_terrain(terrain, step_width=0.33, step_height=0.15, platform_size=3.)
+            # if i ==3:
+            #     terrain_utils.discrete_obstacles_terrain(terrain, 0.3, 1,
+            #                                          2, 10, platform_size=3.)
+            # if i == 1:
+            #     gap_terrain(terrain, gap_size=0.5, platform_size=4.)
                 
             # if i == 3:
             #     balance_beam_terrain(
